@@ -227,6 +227,11 @@ HEXTA/
 
 ## Quick Start (Development)
 
+### Required toolchain
+- Python 3.11.x for the backend
+- Node.js 20.x for the frontend
+- npm 10.x or newer
+
 ```bash
 # 1. Start PostgreSQL with pgvector
 docker run -d --name postgres \
@@ -235,23 +240,34 @@ docker run -d --name postgres \
   -p 5432:5432 \
   pgvector/pgvector:pg16
 
-# 2. Install backend & run API
+# 2. Create and activate a Python virtual environment
 cd backend
 python -m venv .venv
-.venv/bin/pip install -r requirements.txt
-. .env  # Set env vars from .env.example
-.venv/bin/uvicorn app.main:app --workers 1 --reload
+.venv\Scripts\Activate.ps1   # Windows PowerShell
+# or: source .venv/bin/activate  # macOS/Linux
 
-# 3. Run tests
-.venv/bin/python -m pytest tests/ -v
+# 3. Install backend dependencies
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 
-# 4. Run frontend (separate terminal)
-cd frontend
-npm install && npm run dev
+# 4. Set environment variables
+# Copy the example env file if present and adjust values as needed
+# . .env
 
-# 5. Run evaluation benchmark
-cd backend
-.venv/bin/python -m evaluation.run_benchmark
+# 5. Run the API
+.venv\Scripts\python.exe -m uvicorn app.main:app --workers 1 --reload
+
+# 6. Run tests
+.venv\Scripts\python.exe -m pytest tests/unit/ -q
+
+# 7. Run frontend (separate terminal)
+cd ../frontend
+npm ci
+npm run dev
+
+# 8. Run evaluation benchmark
+cd ../backend
+.venv\Scripts\python.exe -m evaluation.run_benchmark --output-dir evaluation/reports
 ```
 
 ---
@@ -293,8 +309,8 @@ Tests are split into **unit** (no database) and **integration** (RBAC enforcemen
 
 ```bash
 cd backend
-.venv/bin/python -m pytest tests/unit/ -v       # ~35 unit tests
-.venv/bin/python -m pytest tests/ -v             # All tests including integration
+.venv\Scripts\python.exe -m pytest tests/unit/ -q
+.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
 **Unit test modules:**
