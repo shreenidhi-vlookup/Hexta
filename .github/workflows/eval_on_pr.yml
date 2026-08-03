@@ -1,0 +1,100 @@
+name: Evaluation on PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/app/search/**"
+      - "backend/app/ranking/**"
+      - "backend/app/response/**"
+      - "backend/app/query_processing/**"
+      - "evaluation/**"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: adminpass
+          POSTGRES_DB: hexa_assistant
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin"
+          --health-interval "10s"
+          --health-timeout "5s"
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Install pgvector and set up schema
+        env:
+          HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
+        run: |
+          PGPASSWORD=admin psql -h localhost -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          cd backend
+          python -c "from app.db.postgres.schema import ensure_schema; ensure_schema()"
+
+      - name: Seed test data
+        env:
+          HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
+        run: |
+          cd backend
+          python -c "
+          from app.db.postgres.session import acquire
+          from app.db.postgres.schema import ensure_schema
+          ensure_schema()
+          # Insert minimal test data
+          with acquire() as conn:
+              with conn.cursor() as cur:
+                  cur.execute('INSERT INTO documents (title, doc_type, department, is_active, is_approved, version) VALUES (%s, %s, %s, true, true, 1) ON CONFLICT DO NOTHING RETURNING id', ('Test Document', 'policy', 'general'))
+                  doc_id = cur.fetchone()[0]
+                  cur.execute('INSERT INTO document_chunks (document_id, content, content_hash, section, chunk_type, department, is_active, is_approved) VALUES (%s, %s, %s, %s, %s, %s, true, true) ON CONFLICT DO NOTHING', (doc_id, 'The minimum credit score for a conventional loan is 620.', 'abc123', 'Eligibility', 'paragraph', 'general'))
+                  conn.commit()
+          print('Test data seeded')
+          "
+
+      - name: Run benchmark
+        env:
+          HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
+          HEXA_JWT_SECRET: test-secret
+        run: |
+          cd backend
+          python -m evaluation.run_benchmark --output-dir evaluation/reports
+
+      - name: Check for regression
+        run: |
+          cd backend
+          python -c "
+          import json, glob, os
+          reports = sorted(glob.glob('evaluation/reports/*.json'), reverse=True)
+          if len(reports) < 2:
+              print('Not enough reports for comparison, skipping regression check')
+              exit(0)
+          latest = json.load(open(reports[0]))
+          previous = json.load(open(reports[1]))
+          # Simple regression check: hit_rate should not drop more than 5%
+          threshold = 0.05
+          for metric in ['hit_rate', 'mrr', 'ndcg']:
+              delta = latest.get(metric, 0) - previous.get(metric, 0)
+              if delta < -threshold:
+                  print(f'REGRESSION: {metric} dropped by {delta:.3f} (threshold: -{threshold})')
+                  exit(1)
+              print(f'{metric}: {previous.get(metric, 0):.3f} → {latest.get(metric, 0):.3f} (delta: {delta:+.3f})')
+          print('No significant regression detected')
+          "
