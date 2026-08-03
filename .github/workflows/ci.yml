@@ -43,8 +43,10 @@ jobs:
           pip install pytest pytest-cov pytest-timeout
 
       - name: Install pgvector extension
+        env:
+          PGPASSWORD: adminpass
         run: |
-          PGPASSWORD=admin psql -h localhost -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          psql -h 127.0.0.1 -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -61,6 +63,7 @@ jobs:
           HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
           HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
           HEXA_ENVIRONMENT: test
+          PGPASSWORD: adminpass
         run: |
           cd backend
           python -m pytest tests/unit/ -v --timeout=60
