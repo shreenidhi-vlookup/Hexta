@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.dependencies import get_current_user
+from app.dependencies import require_auth
 from app.db.postgres.session import acquire
 
 router = APIRouter()
@@ -19,10 +19,16 @@ class FeedbackRequest(BaseModel):
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def submit_feedback(
-    request: FeedbackRequest,
-    user: dict | None = Depends(get_current_user),
+    request: FeedbackRequest | None = None,
+    user: dict = Depends(require_auth),
 ) -> dict:
     """Submit feedback (thumbs up/down) on a response."""
+    if request is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request body is required",
+        )
+
     if request.rating not in (-1, 1):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -35,7 +41,7 @@ async def submit_feedback(
                 "INSERT INTO feedback (user_id, response_id, rating, comment) "
                 "VALUES (%s, %s, %s, %s) RETURNING id",
                 (
-                    user["id"] if user else None,
+                    user["id"],
                     request.response_id,
                     request.rating,
                     request.comment,

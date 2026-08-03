@@ -13,6 +13,7 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -37,7 +38,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
@@ -59,7 +60,6 @@ jobs:
           from app.db.postgres.session import acquire
           from app.db.postgres.schema import ensure_schema
           ensure_schema()
-          # Insert minimal test data
           with acquire() as conn:
               with conn.cursor() as cur:
                   cur.execute('INSERT INTO documents (title, doc_type, department, is_active, is_approved, version) VALUES (%s, %s, %s, true, true, 1) ON CONFLICT DO NOTHING RETURNING id', ('Test Document', 'policy', 'general'))
@@ -81,14 +81,13 @@ jobs:
         run: |
           cd backend
           python -c "
-          import json, glob, os
+          import json, glob
           reports = sorted(glob.glob('evaluation/reports/*.json'), reverse=True)
           if len(reports) < 2:
               print('Not enough reports for comparison, skipping regression check')
               exit(0)
           latest = json.load(open(reports[0]))
           previous = json.load(open(reports[1]))
-          # Simple regression check: hit_rate should not drop more than 5%
           threshold = 0.05
           for metric in ['hit_rate', 'mrr', 'ndcg']:
               delta = latest.get(metric, 0) - previous.get(metric, 0)

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { SearchBar, ResponsePackageCard, RelatedQuestions } from "@/components/search";
 import { searchKnowledgeBase, SearchResponse } from "@/lib/api-client";
-import { ThumbsFeedback } from "@/components/feedback";
+import ThumbsFeedback from "@/components/feedback/ThumbsFeedback";
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
