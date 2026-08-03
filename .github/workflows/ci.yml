@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: adminpass
+          POSTGRES_DB: hexa_assistant
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin"
+          --health-interval "10s"
+          --health-timeout "5s"
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-cov pytest-timeout
+
+      - name: Install pgvector extension
+        run: |
+          PGPASSWORD=admin psql -h localhost -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run unit tests
+        env:
+          HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
+          HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
+          HEXA_ENVIRONMENT: test
+        run: |
+          cd backend
+          python -m pytest tests/unit/ -v --timeout=60
+
+  benchmark:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: .
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m venv .venv && source .venv/bin/activate
+      - run: pip install -r backend/requirements.txt
+      - run: pip install pytest
+      - name: Run evaluation benchmark
+        run: |
+          python -m evaluation.run_benchmark --output-dir evaluation/reports
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: evaluation/reports/

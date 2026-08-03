@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class*
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info
+*.egg
+build/
+dist/
+.eggs/
+
+# Logs
+*.log
+logs/
+
+# Storage (runtime data)
+storage/pending/
+storage/processed/
+
+# Models (cached by fastembed at runtime / pre-baked in Docker)
+nlp_models/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Local development data
+backend/storage/

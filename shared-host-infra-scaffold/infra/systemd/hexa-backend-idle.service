@@ -1,0 +1,6 @@
+[Unit]
+Description=Idle-stop watcher run for hexa-backend
+
+[Service]
+Type=oneshot
+ExecStart=/opt/projects/hexa/infra/scripts/idle_stop_watcher.sh
