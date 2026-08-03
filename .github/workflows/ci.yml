@@ -9,6 +9,7 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -35,7 +36,7 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
 
-      - name: Install dependencies
+      - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
@@ -44,6 +45,16 @@ jobs:
       - name: Install pgvector extension
         run: |
           PGPASSWORD=admin psql -h localhost -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run build
 
       - name: Run unit tests
         env:
@@ -57,6 +68,7 @@ jobs:
   benchmark:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: .
@@ -67,9 +79,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m venv .venv && source .venv/bin/activate
-      - run: pip install -r backend/requirements.txt
-      - run: pip install pytest
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest
       - name: Run evaluation benchmark
         run: |
           python -m evaluation.run_benchmark --output-dir evaluation/reports
