@@ -42,14 +42,14 @@ module.exports = {
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))'
   		},
-  		fontFamily: {
-  			sans: [
-  				'Inter',
-  				'system-ui',
-  				'-apple-system',
-  				'sans-serif'
-  			]
-  		},
+	fontFamily: {
+			sans: [
+				'var(--font-sans)',
+				'system-ui',
+				'-apple-system',
+				'sans-serif'
+			]
+		},
   		keyframes: {
   			'accordion-down': {
   				from: {
