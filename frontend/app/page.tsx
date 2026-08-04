@@ -3,13 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertCircle, LogOut } from "lucide-react";
-import { SearchBar, ResponsePackageCard, RelatedQuestions } from "@/components/search";
+import { AlertCircle, LogOut, Search, Sparkles } from "lucide-react";
+import { ResponsePackageCard, RelatedQuestions } from "@/components/search";
 import { searchKnowledgeBase, SearchResponse } from "@/lib/api-client";
 import { clearToken, getToken } from "@/lib/auth";
 import ThumbsFeedback from "@/components/feedback/ThumbsFeedback";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -21,6 +20,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import HeroSection from "@/components/home/HeroSection";
+import SearchBar from "@/components/search/SearchBar";
 
 export default function HomePage() {
   const router = useRouter();
@@ -65,47 +66,66 @@ export default function HomePage() {
     handleSearch(question);
   };
 
+  const handleClearSearch = () => {
+    setResponse(null);
+    setQuery("");
+    setError(null);
+  };
+
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border py-4">
-        <div className="max-w-4xl mx-auto px-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Hexta</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Knowledge Assistant
-            </p>
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-foreground">Hexta</h1>
+              <p className="text-xs text-muted-foreground -mt-0.5">
+                Knowledge Assistant
+              </p>
+            </div>
           </div>
           {isAuthed ? (
             <Button
               type="button"
               variant="outline"
+              size="sm"
               onClick={() => setShowSignOutDialog(true)}
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className="h-4 w-4 mr-2" />
               Sign out
             </Button>
           ) : (
-            <Button asChild>
+            <Button asChild size="sm">
               <Link href="/login">Sign in</Link>
             </Button>
           )}
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        {!response && !isLoading && (
-          <Card className="mt-12 text-center shadow-sm">
-            <CardContent className="p-10">
-              <h2 className="text-3xl font-bold text-foreground mb-2">
-                Ask me about requirements
-              </h2>
-              <p className="text-muted-foreground mb-8 max-w-2xl mx-auto">
-                I can help you find information about credit scores, LTV ratios,
-                required documents, eligibility criteria, and more — all from
-                our internal knowledge base. Enter your question below to get started.
-              </p>
-            </CardContent>
-          </Card>
+      <main className="max-w-4xl mx-auto px-4 py-8 pb-24">
+        {!response && !isLoading && !error && (
+          <HeroSection onSearch={handleSearch} />
+        )}
+
+        {error && (
+          <Alert variant="destructive" className="mt-8 mx-auto max-w-2xl">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Search failed</AlertTitle>
+            <AlertDescription>
+              {error}
+              <Button
+                variant="link"
+                size="sm"
+                onClick={handleClearSearch}
+                className="ml-2 p-0 h-auto text-inherit underline"
+              >
+                Try again
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
 
         <div className="mt-8">
@@ -115,14 +135,6 @@ export default function HomePage() {
             placeholder="e.g., What is the minimum credit score for a VA loan?"
           />
         </div>
-
-        {error && (
-          <Alert variant="destructive" className="mt-6">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Search failed</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
 
         {response && (
           <>
@@ -139,10 +151,18 @@ export default function HomePage() {
             />
           </>
         )}
+
+        {!response && !isLoading && !error && (
+          <div className="mt-16 text-center">
+            <p className="text-xs text-muted-foreground">
+              Responses are sourced verbatim from internal documents.
+            </p>
+          </div>
+        )}
       </main>
 
-      <footer className="border-t border-border py-6 mt-12">
-        <div className="max-w-4xl mx-auto px-4 text-center text-sm text-muted-foreground">
+      <footer className="border-t border-border py-4">
+        <div className="max-w-4xl mx-auto px-4 text-center text-xs text-muted-foreground">
           Hexta — Knowledge Assistant. All responses are sourced from
           internal documents.
         </div>
