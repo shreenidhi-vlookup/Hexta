@@ -20,8 +20,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.audit.audit_logger import AuditLogEntry, log_query
+from app.auth.rbac import resolve_user_departments
 from app.db.postgres.session import acquire
-from app.dependencies import get_current_user
+from app.dependencies import require_auth
 from app.query_processing.pipeline import process_query
 from app.ranking.rrf import rank_fusion
 from app.response.confidence_thresholds import route_by_confidence
@@ -48,7 +49,7 @@ class SearchResponse(BaseModel):
 @router.post("/", response_model=SearchResponse)
 async def search(
     request: SearchRequest,
-    user: Annotated[dict | None, Depends(get_current_user)] = None,
+    user: Annotated[dict, Depends(require_auth)],
 ) -> SearchResponse:
     """Search the knowledge base for the user's query.
 
@@ -63,7 +64,7 @@ async def search(
 
     if not plan.sub_queries:
         log_query(AuditLogEntry(
-            user_id=user["id"] if user else None,
+            user_id=user["id"],
             query=request.query,
             sub_queries=[],
             retrieved_ids=[],
@@ -113,9 +114,8 @@ async def search(
     )
 
     # Phase 5: Package + validate
-    from app.auth.rbac import resolve_user_departments
 
-    user_depts = resolve_user_departments(user) if user else []
+    user_depts = resolve_user_departments(user)
     package = build_response_package(
         candidates=ranked,
         query_text=request.query,
@@ -128,7 +128,7 @@ async def search(
     valid, reason = validate_package(package, user)
     if not valid:
         log_query(AuditLogEntry(
-            user_id=user["id"] if user else None,
+            user_id=user["id"],
             query=request.query,
             sub_queries=[sq.display for sq in plan.sub_queries],
             retrieved_ids=[],
@@ -145,7 +145,7 @@ async def search(
     # Audit log
     latency_ms = time.time() * 1000 - start_ms
     log_query(AuditLogEntry(
-        user_id=user["id"] if user else None,
+        user_id=user["id"],
         query=request.query,
         sub_queries=[sq.display for sq in plan.sub_queries],
         retrieved_ids=[c.chunk_id for c in ranked[:25]],
@@ -172,6 +172,5 @@ async def search(
         ],
         confidence=package.confidence,
         routing=package.routing,
-        related_questions=["What are the minimum credit score requirements?",
-                          "What documents are required for a VA loan?"],
+        related_questions=[sq.display for sq in plan.sub_queries[:3]] if plan.sub_queries else [],
     )

@@ -71,23 +71,35 @@ def search_knowledge_base(
     # RBAC filter — applied in WHERE clause
     rbac_clause, rbac_params = get_search_filter(user)
 
+    where_parts: list[str] = [
+        "c.fts @@ to_tsquery('english', %s)",
+        "c.is_active = true",
+        "c.is_approved = true",
+        "d.is_active = true",
+        "d.is_approved = true",
+        "c.embedding IS NOT NULL",
+    ]
+    where_params: list = [tsquery]
+
+    if rbac_clause:
+        where_parts.append(rbac_clause)
+        where_params.extend(rbac_params)
+
+    where_clause = " AND ".join(where_parts)
+
     query = f"""
     SELECT c.id, c.document_id, d.title, d.doc_type, c.section,
            c.chunk_type, c.content, c.department,
            c.is_approved AS chunk_is_approved,
            d.version AS document_version,
-           ts_rank_cd(c.fts, phraseto_tsquery('english', %s)) AS bm25_score,
+           ts_rank_cd(c.fts, to_tsquery('english', %s)) AS bm25_score,
            1 - (c.embedding <=> %s) AS vec_score
     FROM document_chunks c
     JOIN documents d ON d.id = c.document_id
-    WHERE c.fts @@ phraseto_tsquery('english', %s)
-      AND c.is_active = true AND c.is_approved = true
-      AND d.is_active = true AND d.is_approved = true
-      AND c.embedding IS NOT NULL
-      {f'AND {rbac_clause}' if rbac_clause else ''}
-    ORDER BY GREATEST(
-        ts_rank_cd(c.fts, phraseto_tsquery('english', %s)),
-        1 - (c.embedding <=> %s)
+    WHERE {where_clause}
+    ORDER BY (
+        ts_rank_cd(c.fts, to_tsquery('english', %s)) * 0.3 +
+        (1 - (c.embedding <=> %s)) * 0.7
     ) DESC
     LIMIT %s
     """
@@ -97,7 +109,7 @@ def search_knowledge_base(
         query_vector,
         tsquery,
     ]
-    params.extend(rbac_params)
+    params.extend(where_params[1:])
     params.extend([tsquery, query_vector, max_results])
 
     with conn.cursor() as cur:

@@ -1,7 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Button } from "@/components/ui/button";
 
 interface RelatedQuestionsProps {
   questions: string[];
@@ -14,35 +19,30 @@ export default function RelatedQuestions({
 }: RelatedQuestionsProps) {
   if (!questions || questions.length === 0) return null;
 
-  const [expanded, setExpanded] = useState(true);
-
   return (
     <div className="mt-6 border-t border-border pt-4">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {expanded ? (
-          <ChevronUp className="w-4 h-4" />
-        ) : (
-          <ChevronDown className="w-4 h-4" />
-        )}
-        Related Questions ({questions.length})
-      </button>
-
-      {expanded && (
-        <div className="mt-3 space-y-2">
-          {questions.map((q, i) => (
-            <button
-              key={i}
-              onClick={() => onAskQuestion?.(q)}
-              className="block w-full text-left p-2.5 text-sm rounded-lg border border-border hover:bg-muted/50 transition-colors text-wrap"
-            >
-              {q}
-            </button>
-          ))}
-        </div>
-      )}
+      <Accordion type="single" collapsible defaultValue="related">
+        <AccordionItem value="related" className="border-none">
+          <AccordionTrigger className="text-sm font-medium text-muted-foreground hover:text-foreground hover:no-underline">
+            Related Questions ({questions.length})
+          </AccordionTrigger>
+          <AccordionContent className="pb-0">
+            <div className="space-y-2 pt-1">
+              {questions.map((q, i) => (
+                <Button
+                  key={i}
+                  type="button"
+                  variant="outline"
+                  onClick={() => onAskQuestion?.(q)}
+                  className="w-full justify-start h-auto py-2.5 px-3 text-left text-sm text-wrap rounded-lg"
+                >
+                  {q}
+                </Button>
+              ))}
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
     </div>
   );
 }

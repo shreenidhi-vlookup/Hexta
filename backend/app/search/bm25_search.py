@@ -16,13 +16,17 @@ _TSQUERY_CLEAN_RE = re.compile(r"[^a-zA-Z0-9\s]")
 def build_tsquery(text: str) -> str:
     """Convert a search string into a PostgreSQL tsquery expression.
 
-    Uses prefix matching so 'credit score' matches 'credit scoring rules'.
+    Uses OR-joined prefix matching for retrieval so any matching term
+    brings a chunk into the candidate set ('credit score' matches
+    'credit scoring rules'). Ranking weights are applied separately
+    via ts_rank_cd, so retrieval can favour recall while ordering
+    stays relevance-driven.
     """
     cleaned = _TSQUERY_CLEAN_RE.sub(" ", text.lower()).strip()
     terms = cleaned.split()
     if not terms:
         return "''::tsquery"
 
-    # Use phrasal prefix matching for each term, combined with &
+    # OR-joined prefix matching: retrieve anything that matches any term
     prefix_terms = [f"{t}:*" for t in terms]
-    return " & ".join(prefix_terms)
+    return " | ".join(prefix_terms)

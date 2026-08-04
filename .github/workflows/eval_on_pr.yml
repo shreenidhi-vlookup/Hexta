@@ -89,7 +89,7 @@ jobs:
           latest = json.load(open(reports[0]))
           previous = json.load(open(reports[1]))
           threshold = 0.05
-          for metric in ['hit_rate', 'mrr', 'ndcg']:
+          for metric in ['sub_question_accuracy', 'intent_accuracy', 'entity_accuracy']:
               delta = latest.get(metric, 0) - previous.get(metric, 0)
               if delta < -threshold:
                   print(f'REGRESSION: {metric} dropped by {delta:.3f} (threshold: -{threshold})')

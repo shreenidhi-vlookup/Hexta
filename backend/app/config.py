@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,7 +38,9 @@ class Settings(BaseSettings):
     database_pool_timeout_s: int = 30
 
     # --- Auth ---
-    jwt_secret: str = "dev-only-secret-change-me-in-production-32chars"
+    # HEXA_JWT_SECRET must be set in production. A default is only
+    # acceptable in development.
+    jwt_secret: str = "dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 480
 
@@ -73,6 +76,14 @@ class Settings(BaseSettings):
     # --- Optional reranker (P2; OFF by default on the micro tier) ---
     rerank_enabled: bool = False
     rerank_model_dir: str = "nlp_models/reranker"
+
+    @model_validator(mode="after")
+    def _check_jwt_secret(self) -> "Settings":
+        if self.environment != "development" and not self.jwt_secret:
+            raise ValueError(
+                "HEXA_JWT_SECRET must be set when environment is not 'development'"
+            )
+        return self
 
 
 @lru_cache

@@ -101,7 +101,13 @@ class TestValidation:
         assert valid is True
         assert reason == "OK"
 
-    def test_validate_low_confidence_fails(self):
+    def test_validate_low_confidence_passes(self):
+        """Low confidence is handled by route_by_confidence, not validation.
+
+        A confidence of 30% should set routing to 'no_answer' but validation
+        must still pass — the package is returned to the user as a graceful
+        'no_answer' response, not a 500 error.
+        """
         package = ResponsePackage(
             response_id="test",
             title="Test",
@@ -109,8 +115,25 @@ class TestValidation:
             routing="no_answer",
         )
         valid, reason = validate_package(package, user=None)
-        assert valid is False
-        assert "below threshold" in reason
+        assert valid is True
+        assert reason == "OK"
+
+    def test_validate_zero_confidence_passes(self):
+        """Zero confidence (no results found) must not cause a 500.
+
+        This is the 'Confidence 0.0% below threshold' bug — validation
+        used to reject zero-confidence packages, causing a 500 error
+        instead of a graceful 'no_answer' response.
+        """
+        package = ResponsePackage(
+            response_id="test",
+            title="No Results Found",
+            confidence=0.0,
+            routing="no_answer",
+        )
+        valid, reason = validate_package(package, user=None)
+        assert valid is True
+        assert reason == "OK"
 
     def test_validate_admin_bypasses_rbac(self):
         from app.response.package_builder import Excerpt, Source

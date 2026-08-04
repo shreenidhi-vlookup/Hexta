@@ -2,6 +2,13 @@
 
 The PRIMARY enforcement is in search/hybrid_orchestrator.py WHERE clause.
 This module re-checks permissions and version flags as a safety net.
+
+Confidence-based routing is handled by
+``response/confidence_thresholds.py`` (``route_by_confidence``) — it sets
+``package.routing`` to ``"answer"``, ``"partial"``, or ``"no_answer"``;
+validation must NOT treat low confidence as a hard failure, otherwise
+every "no answer found" query returns HTTP 500 instead of a graceful
+``no_answer`` response.
 """
 
 from __future__ import annotations
@@ -14,17 +21,18 @@ def validate_package(
     package: ResponsePackage,
     user: dict | None,
     min_confidence: float = 50.0,
-) -> tuple[bool, str]:
-    """Validate a response package against RBAC and confidence thresholds.
+    ) -> tuple[bool, str]:
+    """Validate a response package against RBAC and version rules.
 
     Returns (valid, reason). If invalid, the package should not be returned
     to the user.
-    """
-    # Confidence check
-    if package.confidence < min_confidence:
-        return False, f"Confidence {package.confidence}% below threshold {min_confidence}%"
 
-    # RBAC check — safety net
+    Confidence is **not** checked here — that is the job of
+    ``route_by_confidence``, which decides ``package.routing``.
+    Low-confidence results are valid responses that the caller routes to
+    ``"no_answer"`` or ``"partial"``, not server errors.
+    """
+    # RBAC check — safety net (primary enforcement is in the SQL WHERE clause)
     if user is not None and not is_admin(user):
         user_depts = set(resolve_user_departments(user))
         for excerpt in package.excerpts:

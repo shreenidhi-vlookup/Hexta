@@ -94,3 +94,34 @@ export async function verifyToken(
 
   return response.json();
 }
+
+export interface FeedbackRequest {
+  response_id: string;
+  rating: 1 | -1;
+  comment?: string;
+}
+
+export async function submitFeedback(
+  request: FeedbackRequest,
+  token?: string
+): Promise<{ message: string; feedback_id: number }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/feedback/`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Feedback submission failed');
+  }
+
+  return response.json();
+}
