@@ -38,9 +38,7 @@ class Settings(BaseSettings):
     database_pool_timeout_s: int = 30
 
     # --- Auth ---
-    # HEXA_JWT_SECRET must be set in production. A default is only
-    # acceptable in development.
-    jwt_secret: str = "dev-secret-change-in-production"
+    jwt_secret: str = ""  # required via HEXA_JWT_SECRET env var; no default for safety
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 480
 
@@ -63,7 +61,6 @@ class Settings(BaseSettings):
     bm25_limit: int = 25
     vector_limit: int = 25
     max_sub_queries: int = 4
-    min_confidence_no_answer: float = 50.0
 
     # --- Response ---
     max_excerpt_chars: int = 600
@@ -79,7 +76,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> "Settings":
-        if self.environment != "development" and not self.jwt_secret:
+        if not self.jwt_secret:
+            if self.environment == "development":
+                # Allow empty secret only in development — tests use env vars
+                return self
             raise ValueError(
                 "HEXA_JWT_SECRET must be set when environment is not 'development'"
             )

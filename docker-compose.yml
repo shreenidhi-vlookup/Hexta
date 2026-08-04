@@ -1,5 +1,10 @@
 version: "3.9"
 
+x-backend-env: &backend-env
+  HEXA_DATABASE_URL: "${HEXA_DATABASE_URL:-postgresql://hexa_app:devpass@postgres:5432/hexa_assistant}"
+  HEXA_JWT_SECRET: "${HEXA_JWT_SECRET:-dev-only-secret-change-me-in-production-32chars}"
+  HEXA_ENVIRONMENT: "${HEXA_ENVIRONMENT:-development}"
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -34,9 +39,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      HEXA_DATABASE_URL: postgresql://hexa_app:devpass@postgres:5432/hexa_assistant
-      HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
-      HEXA_ENVIRONMENT: development
+      <<: *backend-env
       HEXA_CORS_ORIGINS: "*"
     ports:
       - "8001:8001"

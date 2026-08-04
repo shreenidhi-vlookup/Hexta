@@ -220,47 +220,47 @@ related_questions=["What are the minimum credit score requirements?",
 
 ### Phase 1: Critical Bug Fixes (Blocking)
 
-- [ ] **1.1** Fix confidence score calculation in `package_builder.py` — normalize RRF scores to 0-100 scale or implement a proper confidence metric
-- [ ] **1.2** Fix hardcoded `related_questions` in `search.py` — use dynamic generation from query processing pipeline
-- [ ] **1.3** Fix unauthenticated access to search endpoint — either require auth or enforce RBAC for unauthenticated users
-- [ ] **1.4** Fix weighted search score in `hybrid_orchestrator.py` — replace `GREATEST` with weighted combination formula from design doc
-- [ ] **1.5** Fix eval_on_pr.yml regression check to use actual metrics from benchmark output
+- [x] **1.1** Fix confidence score calculation in `package_builder.py` — normalize RRF scores to 0-100 scale
+- [x] **1.2** Fix hardcoded `related_questions` in `search.py` — dynamic generation from `plan.sub_queries[:3]`
+- [x] **1.3** Fix unauthenticated access to search endpoint — `require_auth` dependency enforces JWT
+- [x] **1.4** Fix weighted search score in `hybrid_orchestrator.py` — `BM25 * 0.3 + vector * 0.7`
+- [x] **1.5** Fix eval_on_pr.yml regression check — uses actual metrics (`sub_question_accuracy`, `intent_accuracy`, `entity_accuracy`)
 
 ### Phase 2: Missing Files & Implementation Gaps
 
-- [ ] **2.1** Create `backend/app/documents/ocr.py` (Tesseract-based OCR) or remove from design docs
-- [ ] **2.2** Create `backend/app/documents/chunking/table_chunker.py`
-- [ ] **2.3** Create `backend/app/documents/chunking/checklist_chunker.py`
-- [ ] **2.4** Create `backend/app/documents/chunking/recursive_chunker.py`
-- [ ] **2.5** Create `backend/app/query_processing/ner/spacy_pipeline.py`
-- [ ] **2.6** Create `backend/app/query_processing/ner/gliner_extractor.py`
-- [ ] **2.7** Create `backend/app/ranking/reranker.py` (ONNX cross-encoder, top-10, <200ms p95)
-- [ ] **2.8** Create `frontend/next.config.js` with `output: 'export'`
-- [ ] **2.9** Create `frontend/.env.example`
-- [ ] **2.10** Create `backend/requirements-dev.txt`
-- [ ] **2.11** Move upload endpoint from `documents.py` to `documents/upload.py` (or update design docs)
+- [x] **2.1** Create `backend/app/documents/ocr.py` (Tesseract-based OCR)
+- [x] **2.2** Create `backend/app/documents/chunking/table_chunker.py`
+- [x] **2.3** Create `backend/app/documents/chunking/checklist_chunker.py`
+- [x] **2.4** Create `backend/app/documents/chunking/recursive_chunker.py`
+- [x] **2.5** Create `backend/app/query_processing/ner/spacy_pipeline.py`
+- [x] **2.6** Create `backend/app/query_processing/ner/gliner_extractor.py`
+- [x] **2.7** Create `backend/app/ranking/reranker.py` (ONNX cross-encoder, top-10, <200ms p95)
+- [x] **2.8** Create `frontend/next.config.js` with `output: 'export'`
+- [x] **2.9** Create `frontend/.env.example`
+- [x] **2.10** Create `backend/requirements-dev.txt`
+- [x] **2.11** Move upload endpoint from `documents.py` to `documents/upload.py`
 
 ### Phase 3: Security & Hardening
 
-- [ ] **3.1** Migrate password hashing from SHA-256 to bcrypt/argon2 via passlib
-- [ ] **3.2** Remove default `jwt_secret` from `config.py` — require env var
-- [ ] **3.3** Fix SQL injection risk in `hybrid_orchestrator.py` — use parameterized RBAC clause
-- [ ] **3.4** Add RBAC pre-filter test that verifies restricted chunks never reach the reranker
+- [x] **3.1** Migrate password hashing from SHA-256 to bcrypt/argon2 via passlib
+- [x] **3.2** Remove default `jwt_secret` from `config.py` — require env var in production
+- [x] **3.3** Fix SQL injection risk in `hybrid_orchestrator.py` — parameterized RBAC clause with `%s` placeholders
+- [x] **3.4** Add RBAC pre-filter test that verifies restricted chunks never reach the reranker
 
 ### Phase 4: Infrastructure & CI/CD
 
-- [ ] **4.1** Fix `idle_stop_watcher.sh` to track last connection time instead of service start time
-- [ ] **4.2** Implement actual EC2 deployment in `deploy.yml`
-- [ ] **4.3** Add `next.config.js` to frontend build pipeline in CI
+- [x] **4.1** Fix `idle_stop_watcher.sh` to track last connection time via timestamp file
+- [x] **4.2** Implement actual EC2 deployment in `deploy.yml` — SSH-based deploy with health checks
+- [x] **4.3** Add `next.config.js` to frontend build pipeline in CI
 
 ### Phase 5: Code Quality & Maintenance
 
-- [ ] **5.1** Move import inside function body to top of file in `search.py`
-- [ ] **5.2** Fix `feedback.py` to use required body parameter instead of optional
-- [ ] **5.3** Add pagination to `list_documents` endpoint in `documents.py`
-- [ ] **5.4** Fix deterministic `response_id` in `package_builder.py` to include UUID
-- [ ] **5.5** Remove unused `min_confidence_no_answer` from `config.py` or wire it into `confidence_thresholds.py`
-- [ ] **5.6** Add missing test coverage for RBAC pre-filter enforcement
+- [x] **5.1** Move import inside function body to top of file in `search.py`
+- [x] **5.2** Fix `feedback.py` to use required body parameter instead of optional
+- [x] **5.3** Add pagination to `list_documents` endpoint in `documents.py`
+- [x] **5.4** Fix deterministic `response_id` in `package_builder.py` to include UUID
+- [x] **5.5** Remove unused `min_confidence_no_answer` from `config.py`
+- [x] **5.6** Add missing test coverage for RBAC pre-filter enforcement
 
 ---
 
