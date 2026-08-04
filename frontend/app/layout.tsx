@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({
   subsets: ["latin"],
+  display: "swap",
   variable: "--font-sans",
 });
 
@@ -24,7 +25,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="font-sans antialiased">
+      <body className={`${inter.className} antialiased`}>
         {children}
         <Toaster />
       </body>
