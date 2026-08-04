@@ -12,6 +12,8 @@ import time
 import uuid
 from typing import Protocol
 
+from psycopg.types.json import Json
+
 from app.config import settings
 from app.db.postgres.session import acquire
 
@@ -62,7 +64,7 @@ def log_query(entry: AuditLogEntry) -> None:
                     (
                         entry.user_id,
                         entry.query,
-                        entry.sub_queries,
+                        Json(entry.sub_queries) if entry.sub_queries is not None else None,
                         entry.retrieved_ids,
                         entry.confidence,
                         entry.response_id,

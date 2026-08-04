@@ -1,6 +1,6 @@
-# Hexta — Knowledge-Based AI Assistant for Mortgage Lending
+# Hexta — Knowledge-Based AI Assistant
 
-A lightweight, retrieval-only AI assistant for mortgage lending compliance. **No LLM generation anywhere** — every response is a verbatim excerpt from retrieved documents. Designed for shared AWS EC2 micro-tier deployment (1 GiB RAM) where latency, compliance, and cost matter.
+A lightweight, retrieval-only AI assistant for compliance and document queries. **No LLM generation anywhere** — every response is a verbatim excerpt from retrieved documents. Designed for shared AWS EC2 micro-tier deployment (1 GiB RAM) where latency, compliance, and cost matter.
 
 ## Table of Contents
 
@@ -159,8 +159,10 @@ ResponsePackage {
 ### 6. Validation (`response/validation.py`)
 Safety-net validation (not the only RBAC enforcement — that's in the SQL WHERE clause):
 - Re-checks document department access
-- Validates confidence thresholds are reasonable
-- Ensures source attribution is intact
+- Re-checks document approval status and version flags
+- Does **not** check confidence thresholds — that is handled by `confidence_thresholds.py`
+  (`route_by_confidence`), which sets `package.routing`. Low-confidence results return a
+  graceful `"no_answer"` response, not a server error.
 
 ### 7. Audit Logging (`audit/audit_logger.py`)
 Every query is logged to `audit_log` table:
@@ -317,7 +319,7 @@ cd backend
 - `test_backend_skeleton.py` — App startup, auth, JWT, RBAC, endpoints (29 tests)
 - `test_documents.py` — Ingestion validation, chunking, metadata (8 tests)
 - `test_search_ranking.py` — BM25 query building, metadata filters, RRF (12 tests)
-- `test_response.py` — Confidence thresholds, package builder (17 tests)
+- `test_response.py` — Confidence thresholds, package builder, validation (16 tests)
 - `test_spell_correcton.py` — Spell correction phrase repair (4 tests)
 
 **Integration tests:**

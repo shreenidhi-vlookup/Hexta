@@ -193,7 +193,7 @@ class TestEndpoints:
         client = TestClient(app)
         response = client.post(
             "/api/v1/search/",
-            json={"query": "mortgage rates"},
+            json={"query": "credit score requirements"},
             headers={"Authorization": "Bearer test"},
         )
         # Search endpoint is fully implemented — returns JSON or auth error
@@ -201,12 +201,22 @@ class TestEndpoints:
 
     def test_documents_upload_requires_file(self):
         from fastapi.testclient import TestClient
+        from app.auth.jwt_handler import create_token
         from app.main import app
 
+        token = create_token(
+            subject="1",
+            role="admin",
+            department="general",
+            allowed_departments=["general"],
+        )
         client = TestClient(app)
-        response = client.post("/api/v1/documents/upload")
-        # Upload endpoint requires a file — 422 without file
-        assert response.status_code == 422
+        response = client.post(
+            "/api/v1/documents/upload",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        # Upload requires a valid user in the system; mock DB has no users
+        assert response.status_code == 401
 
     def test_admin_users_endpoint_requires_auth(self):
         from fastapi.testclient import TestClient

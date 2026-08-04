@@ -1,4 +1,4 @@
-# CLAUDE.md — Mortgage CRM Intelligent Knowledge Assistant
+# CLAUDE.md — Knowledge Assistant
 
 This file is read by Claude (via Claude Code or any agent working in this
 repo) before making changes. It captures decisions that are **already
@@ -25,6 +25,8 @@ Companion docs (read these for full detail, this file is the summary):
   generation, and it violates the core compliance guarantee of this system.
 
 ## Hard architectural constraints
+
+0. (Implicit from design) **Confidence routing is a response-time decision, not a validation gate.** `confidence_thresholds.py` (`route_by_confidence`) sets `package.routing` to `"answer"`, `"partial"`, or `"no_answer"`. `response/validation.py` only enforces RBAC and approval checks — it must NOT reject low-confidence packages (otherwise "no answer" queries return HTTP 500 instead of a graceful `no_answer` response).
 
 1. **RBAC and active-version filtering happen in the Postgres `WHERE`
    clause at query time** (in `search/hybrid_orchestrator.py` /

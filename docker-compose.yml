@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: hexa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hexa_app
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: hexa_assistant
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 200m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hexa_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hexa-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: hexa_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HEXA_DATABASE_URL: postgresql://hexa_app:devpass@postgres:5432/hexa_assistant
+      HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
+      HEXA_ENVIRONMENT: development
+      HEXA_CORS_ORIGINS: "*"
+    ports:
+      - "8001:8001"
+    deploy:
+      resources:
+        limits:
+          memory: 200m
+    command: >
+      uvicorn app.main:app
+      --workers 1
+      --host 0.0.0.0
+      --port 8001
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hexa_frontend
+    restart: unless-stopped
+    depends_on:
+      - hexa-backend
+    ports:
+      - "3000:80"
+
+volumes:
+  pg_data:

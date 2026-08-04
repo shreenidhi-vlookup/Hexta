@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ThumbsUp, ThumbsDown, Send } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Send, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { submitFeedback } from "@/lib/api-client";
+import { getToken } from "@/lib/auth";
 
 interface ThumbsFeedbackProps {
   responseId: string;
@@ -11,32 +16,34 @@ export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
   const [rating, setRating] = useState<number | null>(null);
   const [comment, setComment] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleRate = (value: number) => {
     setRating(value);
+    setError(null);
   };
 
   const handleSubmit = async () => {
     if (rating === null) return;
 
+    setIsSubmitting(true);
+    setError(null);
+
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api/v1"}/feedback/`,
+      await submitFeedback(
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            response_id: responseId,
-            rating: rating,
-            comment: comment.trim() || undefined,
-          }),
-        }
+          response_id: responseId,
+          rating: rating === 1 ? 1 : -1,
+          comment: comment.trim() || undefined,
+        },
+        getToken() ?? undefined
       );
-      if (response.ok) {
-        setSubmitted(true);
-      }
-    } catch {
       setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Feedback submission failed");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -54,47 +61,59 @@ export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
         Was this helpful?
       </p>
       <div className="flex items-center gap-3 mb-3">
-        <button
+        <Button
+          type="button"
+          variant="outline"
           onClick={() => handleRate(1)}
-          className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-            rating === 1
-              ? "bg-green-100 text-green-800 border-green-300"
-              : "hover:bg-muted border-border"
-          }`}
+          className={cn(
+            "flex items-center gap-1 text-sm rounded-lg",
+            rating === 1 &&
+              "bg-green-100 text-green-800 border-green-300 hover:bg-green-100"
+          )}
         >
           <ThumbsUp className="w-3.5 h-3.5" />
           Helpful
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
           onClick={() => handleRate(-1)}
-          className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-            rating === -1
-              ? "bg-red-100 text-red-800 border-red-300"
-              : "hover:bg-muted border-border"
-          }`}
+          className={cn(
+            "flex items-center gap-1 text-sm rounded-lg",
+            rating === -1 &&
+              "bg-red-100 text-red-800 border-red-300 hover:bg-red-100"
+          )}
         >
           <ThumbsDown className="w-3.5 h-3.5" />
           Not helpful
-        </button>
+        </Button>
       </div>
+
+      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
 
       {rating !== null && (
         <div className="flex items-end gap-2">
-          <textarea
+          <Textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             placeholder="Add a comment (optional)"
             rows={2}
             maxLength={500}
-            className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:ring-2 focus:ring-primary outline-none resize-none"
+            className="flex-1 resize-none"
           />
-          <button
+          <Button
+            type="button"
             onClick={handleSubmit}
-            disabled={!comment.trim() && rating === null}
-            className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            disabled={isSubmitting}
+            className="shrink-0"
+            aria-label="Submit feedback"
           >
-            <Send className="w-3.5 h-3.5" />
-          </button>
+            {isSubmitting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Send className="w-3.5 h-3.5" />
+            )}
+          </Button>
         </div>
       )}
     </div>

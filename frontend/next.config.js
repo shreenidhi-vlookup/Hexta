@@ -5,8 +5,6 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  basePath: '',
-  reactStrictMode: true,
 };
 
 module.exports = nextConfig;

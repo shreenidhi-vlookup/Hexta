@@ -50,7 +50,7 @@ def index_document(
             """,
             (doc_title, doc_type, department, source_path),
         )
-        document_id = cur.fetchone()[0]
+        document_id = cur.fetchone()["id"]
         logger.info("Indexing document '%s' (id=%d)", doc_title, document_id)
 
     indexed = 0

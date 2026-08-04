@@ -8,10 +8,24 @@ synthesis (CLAUDE.md doctrine).
 from __future__ import annotations
 
 import hashlib
+import uuid
 from dataclasses import dataclass, field
 
 from app.config import settings
-from app.ranking.rrf import RankedCandidate
+from app.ranking.rrf import RRF_K, RankedCandidate
+
+
+def _normalize_rrf_score(rrf_score: float) -> float:
+    """Normalize an RRF score to a 0-100 confidence scale.
+
+    The maximum possible RRF score is 2/(K+1) when a candidate ranks
+    first in both the BM25 and vector lists. We normalize against
+    that theoretical maximum and cap at 100.
+    """
+    max_rrf = 2.0 / (RRF_K + 1)
+    if max_rrf <= 0:
+        return 0.0
+    return min((rrf_score / max_rrf) * 100.0, 100.0)
 
 
 @dataclass
@@ -69,7 +83,7 @@ def build_response_package(
 
     excerpts: list[Excerpt] = []
     for c in top:
-        confidence = min(c.rrf_score * 100, 100.0)
+        confidence = round(_normalize_rrf_score(c.rrf_score), 1)
         excerpts.append(Excerpt(
             text=_truncate(c.content, settings.max_excerpt_chars),
             source=Source(
@@ -94,7 +108,7 @@ def build_response_package(
 
     # Generate response_id for audit tracing
     response_id = hashlib.sha256(
-        f"{query_text}:{top_confidence}".encode()
+        f"{query_text}:{top_confidence}:{uuid.uuid4()}".encode()
     ).hexdigest()[:16]
 
     return ResponsePackage(

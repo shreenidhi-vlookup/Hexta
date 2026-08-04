@@ -9,12 +9,20 @@
 # This, combined with socket activation, is what lets multiple
 # projects share 1 GiB RAM: only the projects actually receiving
 # traffic hold memory at any given moment.
+#
+# Idle tracking uses a timestamp file that records when the last
+# active connection was detected. This avoids the pitfall of using
+# ActiveEnterTimestamp (service start time) as a proxy for last
+# activity.
 
 set -euo pipefail
 
 SERVICE="hexa-backend.service"
 PORT=8001
 IDLE_MINUTES=10
+IDLE_SECONDS=$(( IDLE_MINUTES * 60 ))
+TRACKER_DIR="/var/run/hexa"
+TRACKER_FILE="${TRACKER_DIR}/last_active"
 
 if ! systemctl is-active --quiet "$SERVICE"; then
     exit 0   # already stopped, nothing to do
@@ -24,17 +32,25 @@ fi
 ACTIVE_CONNECTIONS=$(ss -tn state established "( dport = :$PORT or sport = :$PORT )" | tail -n +2 | wc -l)
 
 if [ "$ACTIVE_CONNECTIONS" -gt 0 ]; then
-    exit 0   # traffic is flowing, leave it running
+    # Traffic is flowing — update the last-active timestamp.
+    mkdir -p "$TRACKER_DIR"
+    date +%s > "$TRACKER_FILE"
+    exit 0
 fi
 
-# No active connections. Check how long the service has been running
-# with zero connections by using its last-active timestamp as a proxy.
-LAST_STATE_CHANGE=$(systemctl show "$SERVICE" -p ActiveEnterTimestamp --value)
-LAST_EPOCH=$(date -d "$LAST_STATE_CHANGE" +%s 2>/dev/null || echo 0)
-NOW_EPOCH=$(date +%s)
-IDLE_SECONDS=$(( NOW_EPOCH - LAST_EPOCH ))
+# No active connections right now. Check the last-active timestamp.
+if [ ! -f "$TRACKER_FILE" ]; then
+    # No tracker file yet — service just started, give it time.
+    exit 0
+fi
 
-if [ "$IDLE_SECONDS" -ge $(( IDLE_MINUTES * 60 )) ]; then
-    logger -t idle_stop_watcher "Stopping $SERVICE after ${IDLE_MINUTES}m idle"
+LAST_ACTIVE=$(cat "$TRACKER_FILE")
+NOW_EPOCH=$(date +%s)
+IDLE_THRESHOLD_SECONDS=$(( IDLE_MINUTES * 60 ))
+IDLE_SECONDS=$(( NOW_EPOCH - LAST_ACTIVE ))
+
+if [ "$IDLE_SECONDS" -ge "$IDLE_THRESHOLD_SECONDS" ]; then
+    logger -t idle_stop_watcher "Stopping $SERVICE after ${IDLE_MINUTES}m idle (last active ${IDLE_SECONDS}s ago)"
     systemctl stop "$SERVICE"
+    rm -f "$TRACKER_FILE"
 fi

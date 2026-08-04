@@ -1,16 +1,15 @@
 """Auth endpoints (JWT login, verification).
 
-Password storage: SHA-256 hash comparison. For production, migrate to
-bcrypt/argon2 via passlib — SHA-256 is used here only for initial setup
-convenience and must not ship to production without a proper password hasher.
+Password storage: bcrypt via passlib. This is the production-grade
+password hashing scheme — resistant to brute-force and GPU-accelerated
+cracking attacks.
 """
 
 from __future__ import annotations
 
-import hashlib
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from passlib.hash import bcrypt
 from pydantic import BaseModel
 
 from app.auth.jwt_handler import create_token, verify_token
@@ -42,8 +41,6 @@ class TokenVerifyResponse(BaseModel):
 @router.post("/login", response_model=LoginResponse)
 async def login(request: LoginRequest) -> LoginResponse:
     """Authenticate with email + password, return a JWT."""
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
-
     with acquire() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -54,7 +51,7 @@ async def login(request: LoginRequest) -> LoginResponse:
             )
             row = cur.fetchone()
 
-    if row is None or row["password_hash"] != password_hash:
+    if row is None or not bcrypt.verify(request.password, row["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",

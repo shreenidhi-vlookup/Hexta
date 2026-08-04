@@ -19,16 +19,10 @@ class FeedbackRequest(BaseModel):
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def submit_feedback(
-    request: FeedbackRequest | None = None,
+    request: FeedbackRequest,
     user: dict = Depends(require_auth),
 ) -> dict:
     """Submit feedback (thumbs up/down) on a response."""
-    if request is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Request body is required",
-        )
-
     if request.rating not in (-1, 1):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

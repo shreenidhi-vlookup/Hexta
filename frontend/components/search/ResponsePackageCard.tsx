@@ -3,6 +3,7 @@
 import { SearchExcerpt } from "@/lib/api-client";
 import ConfidenceBadge from "./ConfidenceBadge";
 import SourceCitation from "./SourceCitation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface ResponsePackageCardProps {
   title: string;
@@ -19,15 +20,17 @@ export default function ResponsePackageCard({
 }: ResponsePackageCardProps) {
   if (routing === "no_answer" || excerpts.length === 0) {
     return (
-      <div className="max-w-4xl mx-auto mt-8 p-8 bg-card border border-border rounded-xl shadow-sm text-center">
-        <h3 className="text-lg font-semibold text-foreground mb-2">
-          No Answer Found
-        </h3>
-        <p className="text-muted-foreground">
-          I couldn't find information matching your query in the knowledge base.
-          Try rephrasing or asking about a different topic.
-        </p>
-      </div>
+      <Card className="max-w-4xl mx-auto mt-8 shadow-sm text-center">
+        <CardContent className="p-8">
+          <h3 className="text-lg font-semibold text-foreground mb-2">
+            No Answer Found
+          </h3>
+          <p className="text-muted-foreground">
+            I couldn&apos;t find information matching your query in the knowledge
+            base. Try rephrasing or asking about a different topic.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -40,25 +43,29 @@ export default function ResponsePackageCard({
 
       <div className="space-y-4">
         {excerpts.map((excerpt, i) => (
-          <div
-            key={i}
-            className="p-6 bg-card border border-border rounded-xl shadow-sm"
-          >
-            <div className="prose prose-sm max-w-none">
-              {excerpt.text.split("\n").map((line, j) => (
-                <p key={j} className="mb-2 leading-relaxed">
-                  {line}
-                </p>
-              ))}
-            </div>
-            <div className="mt-4 pt-3 border-t border-border">
-              <SourceCitation
-                title={excerpt.source.title}
-                section={excerpt.source.section}
-                chunkType={excerpt.source.chunk_type}
-              />
-            </div>
-          </div>
+          <Card key={i} className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">
+                Source {i + 1}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="prose prose-sm max-w-none">
+                {excerpt.text.split("\n").map((line, j) => (
+                  <p key={j} className="mb-2 leading-relaxed">
+                    {line}
+                  </p>
+                ))}
+              </div>
+              <div className="pt-3 border-t border-border">
+                <SourceCitation
+                  title={excerpt.source.title}
+                  section={excerpt.source.section}
+                  chunkType={excerpt.source.chunk_type}
+                />
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
     </div>

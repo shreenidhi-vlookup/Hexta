@@ -1,5 +1,6 @@
 import "@/styles/globals.css";
 import { Inter } from "next/font/google";
+import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -7,9 +8,13 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: "Hexta — Mortgage Knowledge Assistant",
-  description: "Ask questions about mortgage lending requirements, documents, and policies.",
-  viewport: "width=device-width, initial-scale=1",
+  title: "Hexta — Knowledge Assistant",
+  description: "Ask questions about requirements, documents, and policies.",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -19,7 +24,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        {children}
+        <Toaster />
+      </body>
     </html>
   );
 }

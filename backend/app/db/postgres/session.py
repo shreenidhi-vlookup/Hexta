@@ -50,6 +50,8 @@ def acquire() -> Iterator[psycopg.Connection]:
         if not getattr(conn, "_pgvector_registered", False):
             register_vector(conn)
             conn._pgvector_registered = True  # type: ignore[attr-defined]
+        if conn.row_factory is not psycopg.rows.dict_row:
+            conn.row_factory = psycopg.rows.dict_row
         yield conn
 
 

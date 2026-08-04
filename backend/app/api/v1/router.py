@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, search, documents, feedback, analytics, admin
+from app.api.v1 import admin, analytics, auth, documents, feedback, search, upload
 
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
+api_router.include_router(upload.router, prefix="/documents", tags=["upload"])
 api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
