@@ -48,8 +48,20 @@ jobs:
           cd backend
           python -m pytest tests/unit/ -v --timeout=60
 
+      - name: Check deploy secrets
+        id: deploy-secrets
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          if [ -z "$EC2_HOST" ]; then
+            echo "::warning::Deploy to EC2 skipped: EC2_HOST secret is not configured. Add EC2_HOST, EC2_USER, EC2_SSH_KEY, HEXA_JWT_SECRET and HEXA_DATABASE_URL under Settings > Secrets and variables > Actions."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy to EC2 via SSH
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.deploy-secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.1.0
         with:
           host: ${{ secrets.EC2_HOST }}
