@@ -47,7 +47,7 @@ jobs:
         env:
           HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
         run: |
-          PGPASSWORD=admin psql -h localhost -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          PGPASSWORD=adminpass psql -h localhost -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
           cd backend
           python -c "from app.db.postgres.schema import ensure_schema; ensure_schema()"
 
