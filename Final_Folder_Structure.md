@@ -73,9 +73,7 @@ hexa-knowledge-assistant/
 │   │   │   ├── spell_correction.py
 │   │   │   ├── normalization.py
 │   │   │   ├── intent_detection.py
-│   │   │   ├── ner/
-│   │   │   │   ├── gliner_extractor.py     # loaded lazily, query-time only
-│   │   │   │   └── spacy_pipeline.py       # disable=["ner"] — GLiNER owns entities
+│   │   │   ├── entity_extraction.py            # dictionary-based, no NER model
 │   │   │   ├── query_expansion.py
 │   │   │   └── classification.py
 │   │   │
@@ -99,16 +97,15 @@ hexa-knowledge-assistant/
 │   │   ├── documents/                       # shared by API (upload) and batch ingestion
 │   │   │   ├── upload.py                    # API-side: validate + write to storage/pending/
 │   │   │   ├── validation.py
-│   │   │   ├── ingest_batch.py              # entry point for run_ingestion.sh — NOT imported by main.py
-│   │   │   ├── ocr.py
-│   │   │   ├── text_extraction.py
-│   │   │   ├── chunking/
+│   │   │   ├── ingest_batch.py              # entry point for run_ingestion.sh — NOT imported by main.py (with OCR fallback)
+│   │   │   ├── ocr.py                       # Tesseract OCR — optional fallback for scanned PDFs
+│   │   │   ├── text_extraction.py           # pdfplumber for native PDFs; OCR for scans
+│   │   │   ├── chunking/                    # wired into structural_chunker (tables + checklists)
 │   │   │   │   ├── structural_chunker.py
 │   │   │   │   ├── table_chunker.py
-│   │   │   │   ├── checklist_chunker.py
-│   │   │   │   └── recursive_chunker.py
+│   │   │   │   └── checklist_chunker.py
 │   │   │   ├── metadata_extraction.py
-│   │   │   ├── entity_extraction.py         # GLiNER, batch-time
+│   │   │   ├── entity_extraction.py         # dictionary-based, batch-time
 │   │   │   ├── embedding.py                 # FastEmbed + bge-small-en-v1.5, batch-time
 │   │   │   └── indexing.py                  # writes to Postgres (rows + pgvector column)
 │   │   │

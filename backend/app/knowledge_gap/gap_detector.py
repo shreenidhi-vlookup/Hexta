@@ -3,11 +3,15 @@
 Logs queries that result in low confidence or no answer, so the
 content team can identify gaps in the knowledge base and prioritize
 document ingestion.
+
+Uses the no-answer threshold from response.confidence_thresholds
+(the single source of truth for confidence routing, per CLAUDE.md rule 7).
 """
 
 from __future__ import annotations
 
 from app.db.postgres.session import acquire
+from app.response.confidence_thresholds import DEFAULT_THRESHOLDS
 
 
 def detect_and_log(
@@ -15,19 +19,17 @@ def detect_and_log(
     intent: str | None = None,
     confidence: float | None = None,
 ) -> None:
-    """Log a knowledge gap if confidence is below threshold.
+    """Log a knowledge gap if confidence is below the no-answer threshold.
 
     A knowledge gap is any query where:
     - No documents were retrieved (confidence == 0), or
     - The confidence score is below the no-answer threshold
-      (config.min_confidence_no_answer, default 50)
+      (ConfidenceLevel.low, default 50)
 
     These are written to the knowledge_gaps table for analytics review.
     Never raises — gap detection must not break the request path.
     """
-    from app.config import settings
-
-    threshold = settings.min_confidence_no_answer
+    threshold = DEFAULT_THRESHOLDS.low
     if confidence is not None and confidence >= threshold:
         return  # high enough confidence — not a gap
 

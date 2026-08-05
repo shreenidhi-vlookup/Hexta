@@ -52,7 +52,7 @@ DDL_STATEMENTS: list[str] = [
         id           BIGSERIAL PRIMARY KEY,
         document_id  BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
         content      TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
+        content_hash TEXT NOT NULL UNIQUE,
         embedding    vector(384),
         section      TEXT,
         chunk_type   TEXT NOT NULL DEFAULT 'paragraph',
@@ -106,6 +106,7 @@ INDEX_STATEMENTS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_chunks_active ON document_chunks (department, is_active, is_approved)",
     "CREATE INDEX IF NOT EXISTS idx_chunks_fts ON document_chunks USING gin (fts)",
     "CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON document_chunks USING hnsw (embedding vector_cosine_ops)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_chunks_content_hash ON document_chunks (content_hash)",
 ]
 
 
