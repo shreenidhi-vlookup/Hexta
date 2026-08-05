@@ -25,15 +25,18 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
     """Yield individual checklist items from a text block.
 
     Detects bullet points (-, *, +) and numbered lists (1., 2., etc.)
-    and splits them into separate chunks.
+    and splits them into separate chunks. Only yields chunks if at least
+    one list item is detected — plain paragraphs are not treated as
+    checklists.
     """
     lines = text.split("\n")
     current_item: list[str] = []
+    found_any = False
 
     for line in lines:
         stripped = line.strip()
         if not stripped:
-            if current_item:
+            if current_item and found_any:
                 yield ChecklistChunk(
                     content="\n".join(current_item),
                     section=section,
@@ -44,7 +47,8 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
             continue
 
         if _is_list_item(stripped):
-            if current_item:
+            found_any = True
+            if current_item and found_any:
                 yield ChecklistChunk(
                     content="\n".join(current_item),
                     section=section,
@@ -55,7 +59,7 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
         else:
             current_item.append(stripped)
 
-    if current_item:
+    if current_item and found_any:
         yield ChecklistChunk(
             content="\n".join(current_item),
             section=section,

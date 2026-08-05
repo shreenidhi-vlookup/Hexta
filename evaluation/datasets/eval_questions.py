@@ -2,8 +2,12 @@
 
 Each entry has:
 - question: the raw user query
+- topic_keys: list of topic keys that map to expected_chunk_ids
+  (see datasets/seed_benchmark_data.py for the topic -> chunk_id mapping)
 - expected_document_id: the document ID that should be retrieved (or null)
-- expected_chunk_ids: chunk IDs that contain the answer (or empty list)
+- expected_chunk_ids: chunk IDs that contain the answer (populated at runtime
+  from the benchmark seed mapping; not stored statically because chunk IDs
+  are assigned by the database)
 - expected_intent: the expected sub-query intent classification
 - sub_question_count: expected number of sub-questions after splitting
 - should_correct: whether spell correction should fire
@@ -22,6 +26,7 @@ DATASET = [
         "expected_entities": ["credit score"],
         "expected_sub_questions": 1,
         "expected_answer": True,
+        "topic_keys": ["credit_score"],
     },
     {
         "id": 2,
@@ -32,6 +37,7 @@ DATASET = [
         "expected_entities": ["loan to value", "credit score"],
         "expected_sub_questions": 3,
         "expected_answer": True,
+        "topic_keys": ["documents", "ltv", "credit_score"],
     },
     {
         "id": 3,
@@ -43,6 +49,7 @@ DATASET = [
         "expected_sub_questions": 1,
         "should_correct": True,
         "expected_answer": True,
+        "topic_keys": ["credit_score"],
     },
     {
         "id": 4,
@@ -54,6 +61,7 @@ DATASET = [
         "expected_sub_questions": 1,
         "should_correct": True,
         "expected_answer": True,
+        "topic_keys": ["ltv"],
     },
     {
         "id": 5,
@@ -64,6 +72,7 @@ DATASET = [
         "expected_entities": [],
         "expected_sub_questions": 1,
         "expected_answer": True,
+        "topic_keys": ["employment"],
     },
     {
         "id": 6,
@@ -75,6 +84,7 @@ DATASET = [
         "expected_sub_questions": 1,
         "should_correct": True,
         "expected_answer": True,
+        "topic_keys": ["documents"],
     },
     {
         "id": 7,
@@ -85,6 +95,7 @@ DATASET = [
         "expected_entities": ["loan to value", "conventional"],
         "expected_sub_questions": 1,
         "expected_answer": True,
+        "topic_keys": ["ltv"],
     },
     {
         "id": 8,
@@ -95,6 +106,7 @@ DATASET = [
         "expected_entities": ["down payment"],
         "expected_sub_questions": 1,
         "expected_answer": True,
+        "topic_keys": ["down_payment"],
     },
     {
         "id": 9,
@@ -105,6 +117,7 @@ DATASET = [
         "expected_entities": ["federal housing administration", "veterans affairs"],
         "expected_sub_questions": 1,
         "expected_answer": True,
+        "topic_keys": ["fha", "va", "fha_va"],
     },
     {
         "id": 10,
@@ -115,6 +128,7 @@ DATASET = [
         "expected_entities": ["closing"],
         "expected_sub_questions": 2,
         "expected_answer": True,
+        "topic_keys": ["closing", "fees"],
     },
     {
         "id": 11,
@@ -125,6 +139,7 @@ DATASET = [
         "expected_entities": [],
         "expected_sub_questions": 0,
         "expected_answer": False,
+        "topic_keys": [],
     },
     {
         "id": 12,
@@ -135,6 +150,7 @@ DATASET = [
         "expected_entities": [],
         "expected_sub_questions": 1,
         "expected_answer": False,
+        "topic_keys": [],
     },
 ]
 
