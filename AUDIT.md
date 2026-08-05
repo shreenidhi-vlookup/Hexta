@@ -86,14 +86,11 @@ related_questions=["What are the minimum credit score requirements?",
 **Fix:** Implement the missing chunker modules or update the design docs.
 
 #### 8. Missing NER Modules
-**Files:** `backend/app/query_processing/ner/spacy_pipeline.py`, `backend/app/query_processing/ner/gliner_extractor.py` — DO NOT EXIST
-**Bug:** SKILL.md Phase 3 references these files, but they don't exist. The current `entity_extraction.py` uses dictionary-based extraction instead.
+**Files:** `backend/app/query_processing/ner/spacy_pipeline.py`, `backend/app/query_processing/ner/gliner_extractor.py` — REMOVED
+**Status:** Resolved. The `entity_extraction.py` module uses a dictionary-based approach that was deliberately chosen over GLiNER/spaCy for the 1 GiB shared host. The `ner/` directory was removed and design docs updated to reflect this decision.
 
-**Impact:** Query-time NER doesn't use spaCy or GLiNER as designed. The entity extraction is dictionary-based only.
-
-**Fix:** Implement the NER modules or update the design docs to reflect the dictionary-based approach.
-
-#### 9. Missing Reranker Module
+#### 9. Missing Reranker Module — RESOLVED
+**File:** `backend/app/ranking/reranker.py` — EXISTS, integrated into `search.py` (A1/B1)
 **File:** `backend/app/ranking/reranker.py` — DOES NOT EXIST
 **Bug:** The design docs reference a cross-encoder reranker, but the file doesn't exist. `config.py` has `rerank_enabled: bool = False` but there's no reranker implementation.
 

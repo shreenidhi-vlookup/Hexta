@@ -31,8 +31,8 @@ tech stack table.
 
 | Purpose | Technology | Notes |
 |---|---|---|
-| NLP Pipeline | spaCy | `disable=["ner"]` — GLiNER owns entity extraction |
-| Entity Recognition | GLiNER | smallest quantized variant; loaded query-time (search) and batch-time (ingestion) |
+| NLP Pipeline | — | Dictionary-based entity extraction (entity_extraction.py) — no spaCy/GLiNER |
+| Entity Recognition | Domain term dictionary | Replaced GLiNER — lighter (~0 MB, microseconds) for the 1 GiB shared host |
 | Embeddings | FastEmbed + BAAI/bge-small-en-v1.5 (ONNX Int8) | ~35MB RAM, unchanged from V3.1 — already optimal |
 | Re-ranking | bge-reranker-base/small, **ONNX Int8 quantized** | quantization added to protect the <200ms p95 latency budget on a shared host |
 | OCR | Tesseract (optional) | unchanged |
@@ -56,12 +56,12 @@ tech stack table.
 | Layer | Technology | Notes |
 |---|---|---|
 | Compute | AWS EC2 (t2.micro / t3.micro, 1 GiB RAM) | free tier; shared across multiple projects |
-| Container Base Images | `python:3.11-slim`, `nginx:1.27-alpine` | **not** `python:3.11-alpine` — onnxruntime/spaCy compiled deps are unreliable on musl libc |
+| Container Base Images | `python:3.11-slim`, `nginx:1.27-alpine` | **not** `python:3.11-alpine` — onnxruntime compiled deps are unreliable on musl libc |
 | Process Management | systemd (socket + service + timer units) | on-demand activation, idle-timeout stop |
 | Reverse Proxy | Nginx (shared, one instance for all projects) | one server block per project |
 | Swap | 2GB file on EBS | OOM-killer prevention only, not a performance feature |
 | Monitoring | Prometheus + Grafana | added: CPU credit balance dashboard |
-| Logging | Loguru | synchronous file writes, no heavy middleware |
+| Logging | stdlib logging (file rotation) | synchronous file writes |
 | Audit Logging | Dedicated append-only Postgres table/schema | separate from analytics, compliance artifact |
 | CI/CD | GitHub Actions | includes `eval_on_pr.yml` — blocks merge on retrieval-quality regression |
 

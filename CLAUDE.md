@@ -43,7 +43,7 @@ Companion docs (read these for full detail, this file is the summary):
 4. **The FastAPI backend runs with `--workers 1`** and is socket-activated
    (see `infra/systemd/`) — it is not meant to run continuously. Don't add
    background threads or in-process schedulers that would defeat idle-stop.
-5. **Document ingestion (OCR, chunking, GLiNER, embedding generation) runs
+5. **Document ingestion (OCR, chunking, embedding generation) runs
    only in the batch script** (`infra/scripts/run_ingestion.sh` →
    `backend/app/documents/ingest_batch.py`), never inside `app/main.py` or
    any request handler. The API's `documents/upload.py` only validates and
@@ -64,7 +64,7 @@ Companion docs (read these for full detail, this file is the summary):
    This is separate from `analytics/` and must never be skipped, even for
    "internal" or test queries against production data.
 9. **Container base images: `python:3.11-slim` for anything touching
-   onnxruntime/spaCy/GLiNER. Never `python:3.11-alpine`** for those — musl
+    onnxruntime. Never `python:3.11-alpine`** for those — musl
    libc breaks compiled ML dependencies. `nginx:alpine` is fine (no ML deps).
 10. **Memory is capped per-service** (Postgres ~200MB, Nginx ~30MB, backend
     ~200MB — see `infra/shared/docker-compose.yml` and the systemd units).

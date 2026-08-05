@@ -80,7 +80,7 @@ instance.
    `documents/ingest_batch.py` as the entry point, calling in order:
    `validation.py` → `ocr.py` (optional) → `text_extraction.py` →
    `chunking/structural_chunker.py` → `metadata_extraction.py` →
-   `entity_extraction.py` (GLiNER) → `embedding.py` (FastEmbed) →
+    `entity_extraction.py` (dictionary-based) → `embedding.py` (FastEmbed) →
    `indexing.py` (writes rows + pgvector column).
 3. Implement `chunking/structural_chunker.py` to dispatch by structure
    type (heading/section, table, checklist, paragraph) per
@@ -92,7 +92,7 @@ instance.
 `run_ingestion.sh`, results in searchable rows in `document_chunks` with
 populated embeddings.
 
-**Constraints:** GLiNER and the embedding model must only be loaded
+**Constraints:** The embedding model must only be loaded
 inside `ingest_batch.py`'s process, never imported at module level in
 `app/main.py` or any request handler (that would load them into the
 always-on process). Verify with `ps`/`pmap` that the API process's RSS
@@ -113,20 +113,18 @@ parallel), but needs ingested data to test end-to-end.
 **Steps:**
 1. Build `query_processing/spell_correction.py` (RapidFuzz/SymSpell),
    `normalization.py`, `intent_detection.py`, `query_expansion.py`.
-2. Build `query_processing/ner/spacy_pipeline.py` with
-   `spacy.load("en_core_web_sm", disable=["ner"])`.
-3. Build `query_processing/ner/gliner_extractor.py` restricted to the six
-    domain entity types (Lender, Product, Document, Property,
-   Number, Client) — do not let it expand into general NER.
-4. Assemble into a `process_query(raw: str) -> StructuredQuery` function.
+2. Build `query_processing/entity_extraction.py` — dictionary-based
+       entity extraction (domain terms + numeric patterns). Replaces the
+       originally-planned NLP model approach — lighter and sufficient.
+3. Assemble into a `process_query(raw: str) -> StructuredQuery` function.
 
 **Output:** A pure function that takes a raw query string and returns a
 structured object (corrected text, detected intent, extracted entities,
 expanded terms) — no side effects, no DB calls.
 
 **Constraints:** Keep this stage query-time only. Don't reuse
-`gliner_extractor.py` from ingestion's `entity_extraction.py` without
-checking both need the same entity set — they may diverge over time.
+ingestion's `entity_extraction.py` — query-time uses a lighter
+dictionary approach. They may diverge over time.
 
 **Definition of Done:** Unit tests covering: a misspelled query gets
 corrected; a query naming a lender gets that entity extracted; an

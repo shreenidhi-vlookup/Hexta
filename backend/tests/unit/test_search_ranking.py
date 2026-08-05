@@ -47,10 +47,14 @@ class TestMetadataFilters:
         assert "compliance" in params
 
     def test_no_user_denies_all(self):
+        """When user is None (unauthenticated), the RBAC filter must
+        deny all access — get_search_filter returns '1=0' so no rows
+        can ever pass the WHERE clause."""
         clause, params = get_search_filter(None)
-        # None user has no departments → all access denied via RBAC
-        # But in practice, None means "not authenticated" — check loan_officer path
-        pass
+        # Clause should contain '1=0' (always false) or an equivalent
+        # always-false condition that ensures no results return
+        assert clause != ""
+        assert "1=0" in clause or "false" in clause.lower() or "= 0" in clause
 
     def test_version_filter(self):
         clause, params = get_version_filter()
