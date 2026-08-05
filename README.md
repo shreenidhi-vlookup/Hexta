@@ -66,7 +66,7 @@ Document Ingestion (batch only — never in API path)
 ### Frontend (Next.js)
 | Component | Technology | Purpose |
 |---|---|---|
-| Framework | **Next.js 15** | Static export (no SSR) |
+| Framework | **Next.js 14** | Static export (no SSR) |
 | Styling | **Tailwind CSS** | Utility-first styling |
 | Language | **TypeScript** | Type safety |
 | Auth | Custom JWT client | Browser-side token management |
@@ -201,7 +201,7 @@ HEXTA/
 │   ├── Dockerfile            # python:3.11-slim, --workers 1
 │   └── debug_imports.py      # Import verification
 │
-├── frontend/                  # Next.js 15 static frontend
+├── frontend/                  # Next.js 14 static frontend
 │   ├── app/                  # Pages (static export)
 │   ├── components/           # Search, feedback components
 │   ├── lib/                  # API client, JWT auth

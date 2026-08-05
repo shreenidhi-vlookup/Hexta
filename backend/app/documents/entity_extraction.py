@@ -29,24 +29,27 @@ def extract_entities(text: str) -> IngestionEntities:
     entities = IngestionEntities()
     lowered = text.lower()
 
-    for entry in DOMAIN_TERMS["aliases"]:
-        name = entry["name"].lower()
-        if name in lowered:
-            entity_type = entry.get("type", "")
-            if entity_type in ("acronym", "abbreviation"):
-                if entry["name"] not in entities.acronyms:
-                    entities.acronyms.append(entry["name"])
-            elif entity_type == "lender" or "lender" in entry:
-                if entry["name"] not in entities.lenders:
-                    entities.lenders.append(entry["name"])
-            elif entity_type == "product" or "product" in entry:
-                if entry["name"] not in entities.products:
-                    entities.products.append(entry["name"])
-            elif entity_type == "document" or "document" in entry:
-                if entry["name"] not in entities.documents:
-                    entities.documents.append(entry["name"])
-            elif entity_type == "property" or "property" in entry:
-                if entry["name"] not in entities.property_types:
-                    entities.property_types.append(entry["name"])
+    for canonical, meta in DOMAIN_TERMS.items():
+        entity_type = meta["type"]
+        if entity_type not in ("acronym", "abbreviation", "lender", "product", "document", "property"):
+            continue
+        for alias in meta["aliases"]:
+            if alias in lowered:
+                if entity_type in ("acronym", "abbreviation"):
+                    if canonical not in entities.acronyms:
+                        entities.acronyms.append(canonical)
+                elif entity_type == "lender":
+                    if canonical not in entities.lenders:
+                        entities.lenders.append(canonical)
+                elif entity_type == "product":
+                    if canonical not in entities.products:
+                        entities.products.append(canonical)
+                elif entity_type == "document":
+                    if canonical not in entities.documents:
+                        entities.documents.append(canonical)
+                elif entity_type == "property":
+                    if canonical not in entities.property_types:
+                        entities.property_types.append(canonical)
+                break
 
     return entities

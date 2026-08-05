@@ -36,7 +36,7 @@ below.
                                 ▼
                     Query Processing Engine
         • Spell Correction  • Normalization  • Intent Detection
-        • spaCy (segmentation/POS/parsing)  • GLiNER (domain entities)
+        • Dictionary-based entity extraction (entity_extraction.py)
         • Query Expansion   • Classification
                                 │
                                 ▼
@@ -96,10 +96,8 @@ flowchart TD
     SC --> NORM[Normalization]
     NORM --> ID[Intent Detection]
     ID --> NER{NER}
-    NER --> SPACY[spaCy: segmentation, POS,<br/>lemmatization - NER disabled]
-    NER --> GLINER[GLiNER: domain entities only<br/>loaded lazily, query-time]
-    SPACY --> QE[Query Expansion]
-    GLINER --> QE
+    NER --> ENT[Dictionary-based entity extraction<br/>(entity_extraction.py — no spaCy/GLiNER)]
+    ENT --> QE[Query Expansion]
     QE --> QC[Query Classification]
     QC --> OUT[Structured Query Object]
 ```
@@ -176,10 +174,10 @@ Evaluation Framework — not fixed constants.
 ## 6. Document Ingestion — Decoupled Batch Pipeline
 
 Ingestion runs as its own process (`run_ingestion.sh`), never inside the
-always-on API process. GLiNER, spaCy, and the embedding model are the
-heaviest components in the stack; loading them only for the duration of
-a batch job means that memory is released back to the OS when the job
-ends, instead of being held 24/7.
+always-on API process. The embedding model is the heaviest component in
+the stack; loading it only for the duration of a batch job means that
+memory is released back to the OS when the job ends, instead of being
+held 24/7.
 
 ```mermaid
 flowchart TD
@@ -197,10 +195,10 @@ flowchart TD
     TBL --> META
     CHK --> META
     PARA --> META
-    META --> ENT[GLiNER Entity Extraction]
+    META --> ENT[Dictionary entity extraction]
     ENT --> EMB[Embedding Generation<br/>bge-small-en-v1.5]
     EMB --> IDX[Write rows + pgvector column<br/>to shared Postgres]
-    IDX --> DONE[Process exits —<br/>GLiNER/embedding RAM released]
+    IDX --> DONE[Process exits —<br/>embedding RAM released]
 ```
 
 ---
@@ -248,7 +246,7 @@ sequenceDiagram
     User->>Nginx: Request (first in >10min)
     Nginx->>Socket: Proxy to 127.0.0.1:8001
     Socket->>Backend: Cold start — activates service
-    Note over Backend: Loads models (GLiNER not loaded<br/>here — query-time only, lighter cold start)
+    Note over Backend: Loads models (lighter cold start — dictionary-based NER)
     Backend->>PG: Hybrid search query
     PG-->>Backend: Ranked candidates
     Backend-->>User: Response Package (slower: cold start)
@@ -294,9 +292,9 @@ sequenceDiagram
    BM25 + vector + RBAC filtering collapse into a single SQL query.
 4. **Redis and MinIO dropped for MVP.** Neither is a hard dependency;
    both can be reintroduced once real traffic justifies the RAM cost.
-5. **Ingestion is decoupled from the API process.** GLiNER and the
-   embedding model are the heaviest components — they run only for the
-   duration of a batch job, never resident 24/7.
+5. **Ingestion is decoupled from the API process.** The
+embedding model is the heaviest component — it runs only for the
+duration of a batch job, never resident 24/7.
 6. **Backend is socket-activated and idle-stopped**, not always running.
    This — not per-service tuning — is what makes multiple projects
    coexist on 1 GiB RAM.

@@ -52,7 +52,7 @@
 |---|---|---|
 | bge-small-en-v1.5 (ONNX Int8) | nlp_models/embeddings/ | Downloaded by FastEmbed at runtime |
 | bge-reranker-base/small (ONNX Int8) | nlp_models/reranker/ | Downloaded by transformers at runtime |
-| GLiNER domain model | nlp_models/gliner/ | Downloaded by GLiNER at runtime |
+| — (no NLP model needed) | — | Dictionary-based entity extraction — no model required |
 
 ## Compatibility Issues Found
 
@@ -61,7 +61,7 @@
 3. **uvicorn 0.51.0 vs 0.52.1**: Old version installed. Must upgrade.
 4. **PyJWT 2.9.0 vs 2.13.0**: Old version installed. Must upgrade.
 5. **Missing pydantic-settings**: Required by `config.py`.
-6. **Missing fastembed, onnxruntime, loguru, RapidFuzz, python-multipart, passlib**: All required but not installed.
+6. **Missing fastembed, onnxruntime, RapidFuzz, python-multipart, passlib**: All required but not installed.
 7. **npm security policy**: Running scripts is disabled on this system. Need to adjust execution policy for npm.
 
 ## Step-by-Step Plan

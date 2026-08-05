@@ -4,14 +4,13 @@ set -euo pipefail
 # Seed the database with initial schema + users.
 # Run this against the shared Postgres instance.
 
-cd "$(dirname "$0")/../.."
-
+cd /opt/projects/hexa/backend
 source .venv/bin/activate 2>/dev/null || true
 
 echo "Creating schema..."
 python -m app.db.postgres.schema
 
 echo "Seeding users..."
-python -m app.db.postgres.seed_db
+python -m scripts.seed_db
 
 echo "Done."

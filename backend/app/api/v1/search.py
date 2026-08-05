@@ -4,6 +4,7 @@ Pipeline (no LLM anywhere in the serving path):
   query_processing.process_query →
   search.hybrid_orchestrator.search_knowledge_base →
   ranking.rrf.rank_fusion →
+  ranking.reranker.rerank (optional, cross-encoder) →
   response.package_builder.build_response_package →
   response.validation.validate_package →
   audit.audit_logger.log_query
@@ -21,9 +22,12 @@ from pydantic import BaseModel
 
 from app.audit.audit_logger import AuditLogEntry, log_query
 from app.auth.rbac import resolve_user_departments
+from app.config import settings
 from app.db.postgres.session import acquire
 from app.dependencies import require_auth
+from app.knowledge_gap.gap_detector import detect_and_log
 from app.query_processing.pipeline import process_query
+from app.ranking.reranker import rerank
 from app.ranking.rrf import rank_fusion
 from app.response.confidence_thresholds import route_by_confidence
 from app.response.package_builder import build_response_package
@@ -113,6 +117,22 @@ async def search(
         chunk_lookup=chunk_lookup,
     )
 
+    # Optional cross-encoder reranking (Phase 4b)
+    if settings.rerank_enabled and ranked:
+        rerank_candidates = [
+            {"chunk_id": c.chunk_id, "content": c.content}
+            for c in ranked[: settings.bm25_limit]
+        ]
+        rerank_result = rerank(
+            query=request.query,
+            candidates=rerank_candidates,
+            top_k=min(10, len(rerank_candidates)),
+        )
+        rerank_order = {c["chunk_id"]: i for i, c in enumerate(rerank_result)}
+        ranked.sort(
+            key=lambda c: rerank_order.get(c.chunk_id, len(rerank_order)),
+        )
+
     # Phase 5: Package + validate
 
     user_depts = resolve_user_departments(user)
@@ -123,6 +143,15 @@ async def search(
     )
 
     package.routing = route_by_confidence(package.confidence)
+
+    # Knowledge gap detection (best-effort — never raises)
+    intent = plan.sub_queries[0].intent if plan.sub_queries else "general"
+    if package.routing in ("no_answer", "partial"):
+        detect_and_log(
+            query=request.query,
+            intent=intent,
+            confidence=package.confidence,
+        )
 
     # Safety-net validation
     valid, reason = validate_package(package, user)

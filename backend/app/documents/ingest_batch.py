@@ -4,8 +4,9 @@ Runs as a standalone process (invoked via infra/scripts/run_ingestion.sh),
 NOT inside the FastAPI request handler. Loads the embedding model,
 processes files in storage/pending/, and writes indexed chunks to Postgres.
 
-Pipeline order (per SKILL.md Phase 2):
-  validation → text_extraction → structural_chunker →
+Pipeline order (per SKILL.md Phase 2 and Final_System_Design.md §6):
+  validation → OCR (optional fallback) → text_extraction →
+  structural_chunking (tables, checklists, sections, paragraphs) →
   metadata_extraction → entity_extraction (light) →
   embedding → indexing
 
@@ -28,7 +29,7 @@ from app.documents.embedding import generate_embeddings
 from app.documents.entity_extraction import extract_entities
 from app.documents.indexing import index_document
 from app.documents.metadata_extraction import extract_metadata
-from app.documents.text_extraction import extract_text
+from app.documents.text_extraction import extract_text, ExtractedText
 
 logging.basicConfig(level=settings.log_level, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -46,6 +47,38 @@ def _move_to_processed(file_path: Path) -> None:
         logger.warning("File already moved: %s", file_path)
 
 
+def _try_ocr_fallback(file_path: Path, extracted: ExtractedText) -> ExtractedText | None:
+    """If pdfplumber returned empty/low-quality text, try OCR via pytesseract.
+
+    Only applies to PDFs. Returns a new ExtractedText with OCR text,
+    or None if OCR is unavailable or fails.
+    """
+    if file_path.suffix.lower() != ".pdf":
+        return None
+
+    ocr_text = extracted.text.strip()
+    if len(ocr_text) > 50:  # enough text already extracted
+        return None
+
+    try:
+        from app.documents.ocr import ocr_pdf_pages
+
+        ocr_pages = ocr_pdf_pages(file_path)
+        if ocr_pages:
+            full_text = "\n".join(ocr_pages)
+            if full_text.strip():
+                logger.info("OCR fallback produced %d chars for %s", len(full_text), file_path.name)
+                return ExtractedText(
+                    text=full_text,
+                    pages=ocr_pages,
+                    source_format=extracted.source_format,
+                )
+    except Exception as exc:
+        logger.warning("OCR fallback failed for %s: %s", file_path.name, exc)
+
+    return None
+
+
 def process_file(file_path: Path) -> bool:
     """Process a single document file through the full pipeline."""
     logger.info("Processing: %s", file_path.name)
@@ -55,6 +88,12 @@ def process_file(file_path: Path) -> bool:
     except Exception as e:
         logger.error("Text extraction failed for %s: %s", file_path.name, e)
         return False
+
+    # Optional OCR fallback for scanned PDFs with low text extraction
+    if file_path.suffix.lower() == ".pdf":
+        ocr_result = _try_ocr_fallback(file_path, extracted)
+        if ocr_result is not None:
+            extracted = ocr_result
 
     metadata = extract_metadata(extracted, file_path)
     entities = extract_entities(extracted.text)
@@ -112,7 +151,10 @@ def main(queue_dir: str) -> None:
 
     files = [
         f for f in queue_path.iterdir()
-        if f.is_file() and f.suffix.lower() in {".pdf", ".txt", ".docx", ".html", ".md"}
+        if f.is_file() and f.suffix.lower() in {
+            ".pdf", ".txt", ".docx", ".html", ".htm", ".md",
+            ".csv", ".xlsx", ".pptx", ".odt", ".rtf", ".epub",
+        }
     ]
     if not files:
         logger.info("No files to process in %s", queue_path)
