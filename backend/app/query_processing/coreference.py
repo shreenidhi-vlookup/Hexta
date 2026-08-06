@@ -65,11 +65,21 @@ def _subject_of(question: str) -> str | None:
 
 
 def _is_bare_followup(query: str) -> bool:
-    """A short question with no topic of its own (refers to previous turn)."""
+    """A short question with no topic of its own (refers to previous turn).
+
+    Rejects questions that name a specific subject: a capitalized word
+    mid-question (proper noun such as "France") means the question is
+    self-contained even when the entity is not a known domain term.
+    """
     words = query.split()
     if not words or len(words) > 6:
         return False
-    return bool(_BARE_LEADERS.match(words[0]))
+    if not _BARE_LEADERS.match(words[0].lower()):
+        return False
+    for w in words[1:]:
+        if w[:1].isupper():
+            return False
+    return True
 
 
 def resolve_references(query: str, history: list[dict] | None) -> str:
@@ -104,7 +114,7 @@ def resolve_references(query: str, history: list[dict] | None) -> str:
     #    Only rewrite when the follow-up has no topic of its own, so a
     #    genuinely new short question ("what is a credit score?") is not
     #    polluted with the previous subject.
-    if _is_bare_followup(q_lower):
+    if _is_bare_followup(q):
         plan = qp.process_query(q)
         topic = ent.unique_canonicals(plan.sub_queries[0].entities) if plan.sub_queries else []
         if not topic:
