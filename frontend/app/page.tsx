@@ -114,29 +114,65 @@ export default function HomePage() {
   const now = () =>
     new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const handleSearch = async (q: string) => {
+  const handleSearch = async (q: string, replaceMsgId?: string) => {
     const trimmed = q.trim();
     if (!trimmed || isLoading || submittingRef.current) return;
     submittingRef.current = true;
 
-    const nextId = ++messageIdRef.current;
-    setMessages((prev) => [
-      ...prev,
-      { id: `m${nextId}`, from: "user", query: trimmed, timestamp: now() },
-    ]);
+    if (replaceMsgId) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === replaceMsgId
+            ? {
+                ...m,
+                response: undefined,
+                text: undefined,
+                followUps: undefined,
+                error: undefined,
+                isStreaming: true,
+                streamedTitle: "",
+              }
+            : m
+        )
+      );
+    } else {
+      const nextId = ++messageIdRef.current;
+      setMessages((prev) => [
+        ...prev,
+        { id: `m${nextId}`, from: "user", query: trimmed, timestamp: now() },
+      ]);
+    }
 
     const canned = detectCannedReply(trimmed);
     if (canned) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `m${++messageIdRef.current}`,
-          from: "assistant",
-          text: canned.text,
-          followUps: canned.followUps,
-          timestamp: now(),
-        },
-      ]);
+      if (replaceMsgId) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === replaceMsgId
+              ? {
+                  ...m,
+                  from: "assistant",
+                  text: canned.text,
+                  followUps: canned.followUps,
+                  isStreaming: false,
+                  streamedTitle: "",
+                  timestamp: now(),
+                }
+              : m
+          )
+        );
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `m${++messageIdRef.current}`,
+            from: "assistant",
+            text: canned.text,
+            followUps: canned.followUps,
+            timestamp: now(),
+          },
+        ]);
+      }
       submittingRef.current = false;
       return;
     }
@@ -144,43 +180,49 @@ export default function HomePage() {
     setError(null);
     setIsLoading(true);
 
+    const attach = (id: string, patch: Partial<ChatMessage>) =>
+      setMessages((prev) =>
+        prev.some((m) => m.id === id)
+          ? prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+          : [
+              ...prev,
+              {
+                id,
+                from: "assistant" as const,
+                query: trimmed,
+                timestamp: now(),
+                ...patch,
+              },
+            ]
+      );
+
     try {
       const token = getToken() ?? undefined;
       const history = buildHistory(messages);
       const result = await searchKnowledgeBase(trimmed, token, history);
-      const msgId = `m${++messageIdRef.current}`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: msgId,
-          from: "assistant",
-          response: result,
-          streamedTitle: "",
-          isStreaming: true,
-          timestamp: now(),
-        },
-      ]);
+      const msgId = replaceMsgId ?? `m${++messageIdRef.current}`;
+      attach(msgId, {
+        response: result,
+        streamedTitle: "",
+        isStreaming: true,
+      });
       let currentTitle = "";
       const titleChars = result.title.split("");
       const streamInterval = setInterval(() => {
         if (currentTitle.length < titleChars.length) {
           currentTitle += titleChars[currentTitle.length];
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === msgId ? { ...m, streamedTitle: currentTitle } : m
-            )
-          );
+          attach(msgId, { streamedTitle: currentTitle });
         } else {
           clearInterval(streamInterval);
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === msgId ? { ...m, isStreaming: false } : m
-            )
-          );
+          attach(msgId, { isStreaming: false });
         }
       }, 30);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      if (replaceMsgId) {
+        attach(replaceMsgId, { error: message, isStreaming: false });
+      }
     } finally {
       submittingRef.current = false;
       setIsLoading(false);
@@ -355,7 +397,7 @@ export default function HomePage() {
                                   className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                                   onClick={() => {
                                     if (message.query) {
-                                      handleSearch(message.query);
+                                      handleSearch(message.query, message.id);
                                     }
                                   }}
                                   aria-label="Regenerate answer"
@@ -377,6 +419,10 @@ export default function HomePage() {
                               />
                             )}
                           </>
+                        ) : message.isStreaming ? (
+                          <div className="text-sm text-muted-foreground">
+                            Searching…
+                          </div>
                         ) : (
                           <div className="text-muted-foreground text-sm">
                             {message.error ?? "Something went wrong"}
