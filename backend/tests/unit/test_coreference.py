@@ -55,6 +55,13 @@ class TestBareFollowup:
             "lifetime mortgage What is the maximum age?"
         )
 
+    def test_proper_noun_topic_untouched(self):
+        # A capitalized proper noun (France) means the question names its own
+        # subject even though it is not a domain topic.
+        assert resolve_references("What is the capital of France?", HISTORY_LTM) == (
+            "What is the capital of France?"
+        )
+
 
 class TestReferentialPhrase:
     def test_the_above(self):
