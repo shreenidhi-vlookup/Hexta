@@ -53,6 +53,7 @@ DDL_STATEMENTS: list[str] = [
         document_id  BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
         content      TEXT NOT NULL,
         content_hash TEXT NOT NULL UNIQUE,
+        summary      TEXT,
         embedding    vector(384),
         section      TEXT,
         chunk_type   TEXT NOT NULL DEFAULT 'paragraph',
@@ -99,6 +100,25 @@ DDL_STATEMENTS: list[str] = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
+    # --- User settings (per-user UI preferences) ---
+    """
+    CREATE TABLE IF NOT EXISTS user_settings (
+        id                  BIGSERIAL PRIMARY KEY,
+        user_id             BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        show_related_questions BOOLEAN NOT NULL DEFAULT true,
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    # --- Doc-derived aliases / acronyms (harvested at ingestion) ---
+    """
+    CREATE TABLE IF NOT EXISTS term_aliases (
+        id                  BIGSERIAL PRIMARY KEY,
+        alias               TEXT NOT NULL UNIQUE,
+        canonical           TEXT NOT NULL,
+        document_id         BIGINT REFERENCES documents(id) ON DELETE CASCADE,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
 ]
 
 INDEX_STATEMENTS: list[str] = [
@@ -107,6 +127,7 @@ INDEX_STATEMENTS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_chunks_fts ON document_chunks USING gin (fts)",
     "CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON document_chunks USING hnsw (embedding vector_cosine_ops)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_chunks_content_hash ON document_chunks (content_hash)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_settings_user_id ON user_settings (user_id)",
 ]
 
 

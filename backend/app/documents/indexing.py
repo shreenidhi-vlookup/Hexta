@@ -72,15 +72,16 @@ def index_document(
             cur.execute(
                 """
                 INSERT INTO document_chunks
-                    (document_id, content, content_hash, embedding,
+                    (document_id, content, content_hash, summary, embedding,
                      section, chunk_type, department)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (content_hash) DO NOTHING
                 """,
                 (
                     document_id,
                     chunk.content,
                     ch,
+                    chunk.summary,
                     embedding,
                     chunk.section,
                     chunk.chunk_type,

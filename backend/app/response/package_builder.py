@@ -53,6 +53,7 @@ class Excerpt:
 class ResponsePackage:
     response_id: str
     title: str
+    answer_phrase: str = ""
     excerpts: list[Excerpt] = field(default_factory=list)
     related_questions: list[str] = field(default_factory=list)
     confidence: float = 0.0
@@ -66,6 +67,24 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:max_chars - 3] + "..."
 
 
+def _extract_answer_phrase(text: str, max_chars: int = 200) -> str:
+    """Extract a single answer phrase from the top excerpt text.
+
+    Takes the first sentence or the first `max_chars` characters,
+    whichever is shorter. No synthesis — the phrase is always
+    traceable to a source chunk.
+    """
+    if not text:
+        return ""
+    for sep in (". ", ".\n", ".  ", "! ", "? "):
+        idx = text.find(sep)
+        if idx != -1:
+            candidate = text[: idx + 1]
+            if len(candidate) <= max_chars:
+                return candidate.strip()
+    return text[:max_chars].strip()
+
+
 def build_response_package(
     candidates: list[RankedCandidate],
     query_text: str,
@@ -77,6 +96,7 @@ def build_response_package(
     - Truncates excerpts to max_excerpt_chars
     - Computes confidence from top candidate's RRF score (0-100)
     - Extracts related questions from query entities
+    - Derives answer_phrase from the top excerpt text
     """
     max_docs = settings.max_evidence_docs
     top = candidates[:max_docs]
@@ -106,6 +126,9 @@ def build_response_package(
     # Confidence from the top candidate
     top_confidence = excerpts[0].confidence if excerpts else 0.0
 
+    # Answer phrase from the top excerpt (single traced sentence)
+    answer_phrase = _extract_answer_phrase(excerpts[0].text) if excerpts else ""
+
     # Generate response_id for audit tracing
     response_id = hashlib.sha256(
         f"{query_text}:{top_confidence}:{uuid.uuid4()}".encode()
@@ -114,6 +137,7 @@ def build_response_package(
     return ResponsePackage(
         response_id=response_id,
         title=title,
+        answer_phrase=answer_phrase,
         excerpts=excerpts,
         confidence=top_confidence,
         max_excerpt_chars=settings.max_excerpt_chars,

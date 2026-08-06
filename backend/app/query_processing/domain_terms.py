@@ -134,6 +134,48 @@ DOMAIN_TERMS: dict[str, dict] = {
     "foreclosure": {"type": "status", "aliases": ["foreclosure", "foreclosures"]},
     "loan program": {"type": "process", "aliases": ["loan program", "loan programs", "program guidelines"]},
     "underwriting conditions": {"type": "process", "aliases": ["conditions", "loan conditions", "underwriting conditions"]},
+
+    # --- Later life / equity release ---
+    "equity release": {
+        "type": "product",
+        "aliases": ["equity release", "equity release scheme", "later life lending", "later life equity release", "release equity", "release money from home"],
+    },
+    "lifetime mortgage": {
+        "type": "product",
+        "aliases": ["lifetime mortgage", "lifetime mortgages", "equity release lifetime mortgage", "mortgage for life"],
+    },
+    "home reversion": {"type": "product", "aliases": ["home reversion", "home reversion scheme"]},
+
+    # --- Protection ---
+    "critical illness insurance": {
+        "type": "product",
+        "aliases": ["critical illness", "critical illness insurance", "critical illness cover", "critical illness policy"],
+    },
+    "income protection": {
+        "type": "product",
+        "aliases": ["income protection", "income protection insurance", "income protection policy"],
+    },
+    "deferred period": {"type": "metric", "aliases": ["deferred period", "deferral period"]},
+
+    # --- Lending processes ---
+    "product transfer": {
+        "type": "process",
+        "aliases": ["product transfer", "product switch", "switching products", "switch products", "switch mortgage product"],
+    },
+    "bridging finance": {
+        "type": "product",
+        "aliases": ["bridging finance", "bridging loan", "bridge loan", "bridging finance loan"],
+    },
+
+    # --- Data protection / privacy ---
+    "subject access request": {
+        "type": "process",
+        "aliases": ["subject access request", "sar", "data access request"],
+    },
+    "data erasure": {
+        "type": "process",
+        "aliases": ["data erasure", "erase my data", "erase my information", "erase my personal details", "delete my data", "delete my information", "delete my personal details", "remove my data", "remove my information"],
+    },
 }
 
 # Additional common English / query words that must never be "corrected"
@@ -217,3 +259,59 @@ def type_of(alias: str) -> str | None:
 
 def multiword_aliases() -> list[str]:
     return [a for a in _ALIAS_INDEX if " " in a]
+
+
+# Scenario → concept mapping. Users describe a situation instead of
+# naming the underlying product/concept. When a pattern matches a
+# sub-query, its concept is appended to the expanded search text so the
+# retrieval step sees the canonical term. Patterns are applied to
+# lowercased, normalized query text.
+SCENARIO_CONCEPTS: list[tuple[re.Pattern, str]] = [
+    (
+        re.compile(
+            r"(?:over\s+(?:5[5-9]|[6-8]\d)\b"
+            r"|(?:aged?|is|are|turns?)\s+(?:5[5-9]|[6-9]\d)\b"
+            r"|(?:5[5-9]|[6-9]\d)\s+years?\s+old\b"
+            r"|retir(?:e|ed|ing)?\b"
+            r"|pension(?:er|ers| income)?\b"
+            r"|(?:not|without)\s+sell(?:ing)?\s+(?:the\s+)?(?:home|house|property)\b"
+            r"|stay(?:ing)?\s+in\s+(?:my|the|their|our)?\s*(?:home|house|property)\b"
+            r"|access\s+(?:to\s+)?(?:some\s+)?(?:money|cash)\s+(?:from|out\s+of|in)\s+(?:the\s+|my\s+)?(?:home|house|property)\b"
+            r"|access\s+to\s+(?:some\s+)?(?:money|cash)\b"
+            r"|release\s+(?:cash|money|equity)\b"
+            r"|raise\s+money\s+(?:from|against)\s+(?:the\s+|my\s+)?(?:home|property)\b"
+            r"|equity\s+in\s+(?:my\s+)?(?:home|property)\b)"
+        ),
+        "equity release",
+    ),
+    (
+        re.compile(
+            r"(?:bridging\s+finance\b|bridge\s+loan\b|short[-\s]?term\s+gap\b|"
+            r"buying\s+before\s+selling\b|chain\s+(?:break|broken)\b)"
+        ),
+        "bridging finance",
+    ),
+    (
+        re.compile(
+            r"(?:switch(?:ing)?\s+(?:my\s+)?(?:mortgage\s+)?product\b|"
+            r"change\s+(?:my\s+)?mortgage\s+product\b|new\s+product\s+with\s+same\s+lender\b)"
+        ),
+        "product transfer",
+    ),
+]
+
+
+def scenario_concepts_for(text: str) -> list[str]:
+    """Return canonical concepts whose scenario pattern matches ``text``.
+
+    Deterministic and dependency-free; used by the query pipeline to
+    enrich the expanded search text with the canonical term.
+    """
+    lower = text.lower()
+    seen: set[str] = set()
+    out: list[str] = []
+    for pattern, concept in SCENARIO_CONCEPTS:
+        if pattern.search(lower) and concept not in seen:
+            seen.add(concept)
+            out.append(concept)
+    return out

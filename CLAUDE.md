@@ -18,8 +18,12 @@ Companion docs (read these for full detail, this file is the summary):
 
 **"Find the right information, don't generate new information."**
 
-- No LLM call anywhere in the request-serving path. No `Answer` field —
+- No generative LLM call anywhere in the request-serving path. No `Answer` field —
   only `Response Package` (retrieved excerpts, never synthesized text).
+- Runtime extractive summarization (LexRank/TextRank/LSA via Sumy) is allowed
+  in the serving path to produce a single answer phrase from retrieved chunks.
+  The summary sentences must be selected directly from the retrieved content,
+  not invented or paraphrased.
 - If you find yourself writing code that assembles a sentence from
   multiple sources or paraphrases retrieved content, stop — that's
   generation, and it violates the core compliance guarantee of this system.

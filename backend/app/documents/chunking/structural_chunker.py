@@ -27,6 +27,7 @@ class Chunk:
     section: str | None
     chunk_type: str
     page_number: int | None
+    summary: str | None = None
 
 
 @dataclass

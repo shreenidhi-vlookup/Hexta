@@ -92,28 +92,37 @@ export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
       {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
 
       {rating !== null && (
-        <div className="flex items-end gap-2">
+        <div className="space-y-2">
+          <label
+            htmlFor={`feedback-comment-${responseId}`}
+            className="block text-sm text-muted-foreground"
+          >
+            Optional feedback
+          </label>
           <Textarea
+            id={`feedback-comment-${responseId}`}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            placeholder="Add a comment (optional)"
-            rows={2}
+            placeholder="Tell us what could be improved..."
+            rows={3}
             maxLength={500}
-            className="flex-1 resize-none"
+            className="resize-none"
           />
-          <Button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-            className="shrink-0"
-            aria-label="Submit feedback"
-          >
-            {isSubmitting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Send className="w-3.5 h-3.5" />
-            )}
-          </Button>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              aria-label="Submit feedback"
+            >
+              {isSubmitting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Submit
+            </Button>
+          </div>
         </div>
       )}
     </div>

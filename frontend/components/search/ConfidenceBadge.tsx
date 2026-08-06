@@ -1,6 +1,6 @@
 "use client";
 
-import { Shield, TrendingUp, AlertCircle } from "lucide-react";
+import { CheckCircle2, ShieldAlert, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -37,13 +37,13 @@ export default function ConfidenceBadge({
   const getIcon = () => {
     switch (routing) {
       case "answer":
-        return <Shield className="w-4 h-4" />;
+        return <CheckCircle2 className="w-4 h-4" />;
       case "partial":
-        return <TrendingUp className="w-4 h-4" />;
+        return <TriangleAlert className="w-4 h-4" />;
       case "no_answer":
-        return <AlertCircle className="w-4 h-4" />;
+        return <ShieldAlert className="w-4 h-4" />;
       default:
-        return <Shield className="w-4 h-4" />;
+        return <CheckCircle2 className="w-4 h-4" />;
     }
   };
 
@@ -63,7 +63,7 @@ export default function ConfidenceBadge({
   return (
     <Badge
       className={cn(
-        "inline-flex items-center gap-1.5 font-medium",
+        "inline-flex items-center gap-1.5 font-medium whitespace-nowrap",
         sizeClasses[size],
         getVariant()
       )}

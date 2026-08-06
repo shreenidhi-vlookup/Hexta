@@ -26,3 +26,5 @@ pdf2image==1.17.0
 openpyxl==3.1.5
 python-pptx==1.0.2
 striprtf==0.0.28
+# Extractive summarization (batch ingestion only, not in serving path)
+sumy==0.11.0

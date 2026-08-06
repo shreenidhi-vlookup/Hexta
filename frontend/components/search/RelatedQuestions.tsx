@@ -1,5 +1,6 @@
 "use client";
 
+import { HelpCircle } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -27,15 +28,16 @@ export default function RelatedQuestions({
             Related Questions ({questions.length})
           </AccordionTrigger>
           <AccordionContent className="pb-0">
-            <div className="space-y-2 pt-1">
+            <div className="space-y-2 pt-2">
               {questions.map((q, i) => (
                 <Button
                   key={i}
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   onClick={() => onAskQuestion?.(q)}
-                  className="w-full justify-start h-auto py-2.5 px-3 text-left text-sm text-wrap rounded-lg"
+                  className="flex h-auto w-full items-start justify-start gap-2.5 rounded-lg border border-dashed border-border bg-background px-3 py-2.5 text-left text-sm text-wrap text-foreground hover:bg-accent"
                 >
+                  <HelpCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
                   {q}
                 </Button>
               ))}

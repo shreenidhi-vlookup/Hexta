@@ -24,11 +24,13 @@ from pathlib import Path
 from app.config import settings
 from app.db.postgres.schema import ensure_schema
 from app.db.postgres.session import acquire
+from app.documents.abbreviations import harvest_abbreviations
 from app.documents.chunking.structural_chunker import StructuralChunker
 from app.documents.embedding import generate_embeddings
 from app.documents.entity_extraction import extract_entities
 from app.documents.indexing import index_document
 from app.documents.metadata_extraction import extract_metadata
+from app.documents.summarization import summarize_chunk
 from app.documents.text_extraction import extract_text, ExtractedText
 
 logging.basicConfig(level=settings.log_level, format="%(levelname)s %(name)s: %(message)s")
@@ -113,7 +115,6 @@ def process_file(file_path: Path) -> bool:
 
     logger.info("Produced %d chunks", len(chunks))
 
-    embeddings = None
     if settings.embedding_enabled:
         try:
             chunk_texts = [c.content for c in chunks]
@@ -121,6 +122,11 @@ def process_file(file_path: Path) -> bool:
         except Exception as e:
             logger.error("Embedding generation failed for %s: %s", file_path.name, e)
             embeddings = None
+    else:
+        embeddings = None
+
+    for chunk in chunks:
+        chunk.summary = summarize_chunk(chunk.content)
 
     with acquire() as conn:
         result = index_document(
@@ -138,8 +144,33 @@ def process_file(file_path: Path) -> bool:
             result.chunks_skipped,
             result.document_id,
         )
+        _index_abbreviations(conn, result.document_id, chunks)
 
     return True
+
+
+def _index_abbreviations(conn, document_id: int, chunks) -> None:
+    """Harvest acronym definitions from chunks into the term_aliases table."""
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        for alias, canonical in harvest_abbreviations(chunk.content):
+            if alias in seen:
+                continue
+            seen.add(alias)
+            pairs.append((alias, canonical))
+
+    if not pairs:
+        return
+
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO term_aliases (alias, canonical, document_id) "
+            "VALUES (%s, %s, %s) ON CONFLICT (alias) DO NOTHING",
+            [(alias, canonical, document_id) for alias, canonical in pairs],
+        )
+    conn.commit()
+    logger.info("Indexed %d abbreviations for document %d", len(pairs), document_id)
 
 
 def main(queue_dir: str) -> None:
