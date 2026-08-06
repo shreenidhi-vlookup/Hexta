@@ -30,11 +30,11 @@ from app.query_processing import domain_terms
 _BOUNDARY_RE = re.compile(
     r"([?!;\n])"
     r"|((?<!\d),(?!\d))"
-    r"|((?<=\s)(and|also|plus|or|additionally)(?=\s))"
+    r"|((?<=\s)(and|also|plus|or|additionally|as well as|then)(?=\s))"
 )
 
 _HARD = frozenset("?!;")
-_CONJUNCTIONS = frozenset(("and", "also", "plus", "or", "additionally"))
+_CONJUNCTIONS = frozenset(("and", "also", "plus", "or", "additionally", "as well as", "then"))
 
 _CONNECTIVE_PREFIX_RE = re.compile(
     r"^(?:and|also|plus|or|additionally|in addition|then)\s+"
