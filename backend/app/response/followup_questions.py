@@ -151,11 +151,16 @@ def _is_answerable(conn: Connection, question: str) -> bool:
                     WHERE c.is_active AND c.is_approved
                       AND d.is_active AND d.is_approved
                       AND c.fts @@ to_tsquery('english', %s)
-                )
+                ) AS is_answerable
                 """,
                 (tsquery,),
             )
-            return bool(cur.fetchone()[0])
+            # acquire() always sets row_factory=dict_row on pooled connections
+            # (see db/postgres/session.py), so fetchone() returns a mapping,
+            # not a tuple — indexing with [0] raises KeyError and this check
+            # would silently no-op via the except below on every call.
+            row = cur.fetchone()
+            return bool(row["is_answerable"]) if row else True
     except Exception:
         logger.warning("Follow-up answerability check failed", exc_info=True)
         return True
