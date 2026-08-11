@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from passlib.hash import bcrypt
 from pydantic import BaseModel
 
 from app.auth.permissions import require_role
@@ -12,6 +13,20 @@ from app.dependencies import require_auth
 from app.db.postgres.session import acquire
 
 router = APIRouter()
+
+
+class UserCreate(BaseModel):
+    """Fields required to provision a new user account by an admin."""
+
+    email: str
+    password: str
+    full_name: str | None = None
+    role: str = "loan_officer"
+    department: str = "general"
+    allowed_departments: list[str] = []
+    client_id: str | None = None
+    assigned_clients: list[str] = []
+    assigned_cases: list[str] = []
 
 
 class UserUpdate(BaseModel):
@@ -45,6 +60,74 @@ async def list_users(user: dict = Depends(require_auth)) -> dict:
             users = [dict(row) for row in cur.fetchall()]
 
     return {"users": users}
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+async def create_user(
+    body: UserCreate,
+    user: dict = Depends(require_auth),
+) -> dict:
+    """Provision a new user account. Requires admin role.
+
+    Assigning an elevated role (anything other than ``loan_officer``) is
+    restricted to super_admin; plain admins create users with the default
+    role. Passwords are stored as bcrypt hashes.
+    """
+    require_role(user, "admin")
+
+    if body.role != "loan_officer" and user.get("role") != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super_admin may assign elevated roles",
+        )
+
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid email address is required",
+        )
+    if len(body.password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters",
+        )
+
+    password_hash = bcrypt.hash(body.password)
+
+    with acquire() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            if cur.fetchone() is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A user with that email already exists",
+                )
+
+            cur.execute(
+                "INSERT INTO users (email, password_hash, full_name, role, "
+                "department, allowed_departments, client_id, assigned_clients, "
+                "assigned_cases) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "RETURNING id, email, full_name, role, department, "
+                "allowed_departments, client_id, assigned_clients, assigned_cases, "
+                "is_active, created_at",
+                (
+                    email,
+                    password_hash,
+                    body.full_name,
+                    body.role,
+                    body.department,
+                    body.allowed_departments,
+                    body.client_id,
+                    body.assigned_clients,
+                    body.assigned_cases,
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+
+    return {"user": dict(row)}
 
 
 @router.get("/stats")

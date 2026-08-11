@@ -300,6 +300,39 @@ export async function getAdminUsers(token: string): Promise<{ users: AdminUser[]
   return adminFetch('/admin/users', token);
 }
 
+export interface CreateUserRequest {
+  email: string;
+  password: string;
+  full_name?: string | null;
+  role: string;
+  department: string;
+  allowed_departments: string[];
+  client_id?: string | null;
+  assigned_clients: string[];
+  assigned_cases: string[];
+}
+
+export async function createUser(
+  req: CreateUserRequest,
+  token: string
+): Promise<{ user: AdminUser }> {
+  const response = await fetch(`${API_BASE_URL}/admin/users`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(req),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Failed to create user");
+  }
+
+  return response.json();
+}
+
 export async function getAdminDocuments(
   token: string
 ): Promise<{ documents: AdminDocument[] }> {
