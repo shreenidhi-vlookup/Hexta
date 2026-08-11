@@ -72,7 +72,7 @@ jobs:
         run: |
           python -m evaluation.run_benchmark --output-dir evaluation/reports
 
-- name: Check for regression
+      - name: Check for regression
         run: |
           python -c "
           import json, glob
