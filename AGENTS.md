@@ -252,7 +252,7 @@ docker compose up -d
 Services:
 - `hexa_postgres` — PostgreSQL + pgvector on port 5432
 - `hexa_backend` — FastAPI on port 8001. **No code bind mount** — only `./storage:/app/storage` is mounted; code is baked into the image and uvicorn runs without `--reload`. Code changes require `docker compose up -d --build hexa-backend`.
-- `hexa_frontend` — Next.js static export on port 3000 (nginx)
+- `hexa_frontend` — Next.js static export on port 80 (nginx)
 
 ### Production (shared host)
 
