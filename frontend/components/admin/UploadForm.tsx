@@ -34,7 +34,12 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
     try {
       const token = getToken() ?? "";
       const res = await uploadDocument(file, token);
-      setResult({ ok: true, message: res.message });
+      setResult({
+        ok: true,
+        message: res.indexing
+          ? res.message
+          : `${res.message} The document will not be indexed automatically.`,
+      });
       setFile(null);
       if (inputRef.current) inputRef.current.value = "";
       onSuccess?.();

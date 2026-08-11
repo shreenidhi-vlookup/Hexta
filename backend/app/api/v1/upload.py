@@ -1,8 +1,10 @@
 """Document upload API endpoint.
 
-Per CLAUDE.md rule 5: validates and writes to storage/pending/ only.
-Does NOT call ingestion logic. Ingestion runs separately via
-infra/scripts/run_ingestion.sh → app.documents.ingest_batch
+Per CLAUDE.md rule 5, this endpoint only validates and writes to
+storage/pending/. It does NOT run ingestion in-process. Instead, after
+the file is persisted it spawns the ingestion batch as a detached
+subprocess (auto_ingest.trigger_ingestion) so the document becomes
+searchable automatically without blocking the request handler.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from app.auth.permissions import require_role
 from app.config import settings
 from app.dependencies import require_auth
+from app.documents.auto_ingest import trigger_ingestion
 from app.documents.validation import validate_upload
 
 router = APIRouter()
@@ -57,9 +60,16 @@ async def upload_document(
     dest = pending_dir / unique_name
     dest.write_bytes(content)
 
+    indexed = trigger_ingestion(pending_dir)
+
     return {
-        "message": "File uploaded successfully",
+        "message": (
+            "File uploaded successfully and queued for indexing."
+            if indexed
+            else "File uploaded successfully. Manual ingestion required."
+        ),
         "filename": file.filename,
         "stored_as": str(dest),
         "size_bytes": file_size,
+        "indexing": indexed,
     }
