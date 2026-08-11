@@ -33,6 +33,22 @@ ADMIN_ROLES: set[str] = {"super_admin", "admin"}
 # Roles scoped to a single client_id (cannot see other clients' data).
 CLIENT_ROLES: set[str] = {"client"}
 
+# Staff role hierarchy, lowest to highest privilege. This is the single
+# source of truth for auth/permissions.py::require_role — it must stay in
+# sync with ROLE_DEPARTMENTS above. "client" is deliberately excluded: it
+# is a separate, non-staff track (see CLIENT_ROLES) that must never be
+# comparable to the staff ladder, so it is checked independently by
+# require_role rather than being slotted in here.
+STAFF_ROLE_HIERARCHY: list[str] = [
+    "compliance", "underwriter", "loan_officer", "admin", "super_admin",
+]
+
+assert set(STAFF_ROLE_HIERARCHY) | CLIENT_ROLES == set(ROLE_DEPARTMENTS), (
+    "STAFF_ROLE_HIERARCHY + CLIENT_ROLES must cover every role in "
+    "ROLE_DEPARTMENTS — a role missing from both would silently bypass "
+    "require_role() (see auth/permissions.py)."
+)
+
 
 def is_client(user: dict | None) -> bool:
     """Check if the user is a client (scoped to their own client_id only)."""
