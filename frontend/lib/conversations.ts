@@ -2,6 +2,8 @@
 // Stays in localStorage so the app stays light; the API is isolated behind
 // this module so it can be swapped for server-side persistence later.
 
+import { getCurrentUserId } from "./auth";
+
 export const CHATS_STORAGE_KEY = "hexa_recent_chats";
 export const CHAT_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -19,9 +21,16 @@ export interface RecentChat {
   turns: ChatTurn[];
 }
 
+// Chats are namespaced per user so staff and admin (and different users)
+// sharing a browser never see or clear each other's history.
+function chatsKey(): string {
+  const userId = getCurrentUserId();
+  return userId != null ? `${CHATS_STORAGE_KEY}_${userId}` : CHATS_STORAGE_KEY;
+}
+
 function safeParse(): RecentChat[] {
   try {
-    const raw = localStorage.getItem(CHATS_STORAGE_KEY);
+    const raw = localStorage.getItem(chatsKey());
     if (!raw) return [];
     const value = JSON.parse(raw);
     return Array.isArray(value) ? (value as RecentChat[]) : [];
@@ -32,7 +41,7 @@ function safeParse(): RecentChat[] {
 
 function persist(chats: RecentChat[]) {
   try {
-    localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(chats));
+    localStorage.setItem(chatsKey(), JSON.stringify(chats));
   } catch {
     // ignore quota errors — never block the chat UI
   }

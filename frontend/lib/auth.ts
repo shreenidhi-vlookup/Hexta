@@ -60,6 +60,22 @@ export function getTokenRole(token: string): string | null {
   }
 }
 
+export function getTokenUserId(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const sub = payload.sub;
+    const id = Number(sub);
+    return Number.isFinite(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getCurrentUserId(): number | null {
+  const token = getToken();
+  return token ? getTokenUserId(token) : null;
+}
+
 export const ADMIN_ROLES = new Set(["super_admin", "admin"]);
 
 export function isAdminRole(role: string | null): boolean {
