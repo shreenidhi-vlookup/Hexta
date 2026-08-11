@@ -7,12 +7,13 @@ cracking attacks.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.hash import bcrypt
 from pydantic import BaseModel
 
 from app.auth.jwt_handler import create_token, verify_token
+from app.auth.rate_limit import limiter
 from app.config import settings
 from app.db.postgres.session import acquire
 
@@ -39,8 +40,25 @@ class TokenVerifyResponse(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest) -> LoginResponse:
-    """Authenticate with email + password, return a JWT."""
+async def login(request: Request, body: LoginRequest) -> LoginResponse:
+    """Authenticate with email + password, return a JWT.
+
+    Protected by a per-IP request budget and a brute-force lockout that
+    blocks an email/IP after repeated failed attempts (returns 429).
+    """
+    ip = request.client.host if request.client else "unknown"
+
+    if limiter.is_locked(ip, body.email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later.",
+        )
+    if not limiter.check_request(ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login requests. Please wait a moment and retry.",
+        )
+
     with acquire() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -48,15 +66,18 @@ async def login(request: LoginRequest) -> LoginResponse:
                 "allowed_departments, client_id, assigned_clients, assigned_cases "
                 "FROM users "
                 "WHERE email = %s AND is_active = true",
-                (request.email,),
+                (body.email,),
             )
             row = cur.fetchone()
 
-    if row is None or not bcrypt.verify(request.password, row["password_hash"]):
+    if row is None or not bcrypt.verify(body.password, row["password_hash"]):
+        limiter.register_failure(ip, body.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
+
+    limiter.clear(ip, body.email)
 
     token = create_token(
         subject=str(row["id"]),
