@@ -62,7 +62,7 @@ services:
     depends_on:
       - hexa-backend
     ports:
-      - "3000:80"
+      - "80:80"
 
 volumes:
   pg_data:
