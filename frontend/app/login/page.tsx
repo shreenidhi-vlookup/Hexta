@@ -19,6 +19,7 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showForgotInfo, setShowForgotInfo] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,10 +118,25 @@ export default function LoginPage() {
                 Remember me
               </Label>
             </div>
-            <a className="text-sm underline hover:no-underline" href="#">
+            <button
+              type="button"
+              className="text-sm underline hover:no-underline"
+              onClick={() => setShowForgotInfo((v) => !v)}
+              aria-expanded={showForgotInfo}
+            >
               Forgot password?
-            </a>
+            </button>
           </div>
+
+          {showForgotInfo && (
+            <Alert className="mt-4">
+              <AlertTitle>Password reset</AlertTitle>
+              <AlertDescription>
+                Self-service password reset is not available. Please contact
+                your administrator to reset your password.
+              </AlertDescription>
+            </Alert>
+          )}
 
           {error && (
             <Alert variant="destructive">

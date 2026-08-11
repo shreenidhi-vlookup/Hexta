@@ -38,9 +38,17 @@ module.exports = {
   				DEFAULT: 'hsl(var(--card))',
   				foreground: 'hsl(var(--card-foreground))'
   			},
-  			border: 'hsl(var(--border))',
-  			input: 'hsl(var(--input))',
-  			ring: 'hsl(var(--ring))'
+   			border: 'hsl(var(--border))',
+   			input: 'hsl(var(--input))',
+   			ring: 'hsl(var(--ring))',
+   			success: {
+   				DEFAULT: 'hsl(var(--success))',
+   				foreground: 'hsl(var(--success-foreground))'
+   			},
+   			warning: {
+   				DEFAULT: 'hsl(var(--warning))',
+   				foreground: 'hsl(var(--warning-foreground))'
+   			}
   		},
 	fontFamily: {
 			sans: [

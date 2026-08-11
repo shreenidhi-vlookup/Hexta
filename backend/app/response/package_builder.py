@@ -8,6 +8,7 @@ synthesis (CLAUDE.md doctrine).
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass, field
 
@@ -35,9 +36,11 @@ class Source:
     title: str
     section: str | None
     chunk_type: str
+    department: str
     is_approved: bool
     document_version: int
     page_number: int | None = None
+    client_id: str | None = None
 
 
 @dataclass
@@ -53,6 +56,7 @@ class Excerpt:
 class ResponsePackage:
     response_id: str
     title: str
+    answer_phrase: str = ""
     excerpts: list[Excerpt] = field(default_factory=list)
     related_questions: list[str] = field(default_factory=list)
     confidence: float = 0.0
@@ -61,9 +65,133 @@ class ResponsePackage:
 
 
 def _truncate(text: str, max_chars: int) -> str:
+    """Truncate to max_chars, breaking at a word boundary and signalling
+    the cut with an ellipsis so a hard mid-word chop never reaches the UI."""
     if len(text) <= max_chars:
         return text
-    return text[:max_chars - 3] + "..."
+    head = text[: max_chars - 1]
+    space = head.rfind(" ")
+    if space > max_chars // 2:
+        head = head[:space]
+    return head + "…"
+
+
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+_FOOTER_RE = re.compile(r"^(source:|category:|note:|see\s)", re.IGNORECASE)
+_TERMINAL_PUNCT = set(".!?")
+
+# Interrogative openers — a sentence starting with one of these is almost
+# always a question ("What is the deferred period?"), never an answer. Kept
+# intentionally narrow: words like "Minimum"/"Maximum"/"Tell" are common
+# answer openers too, so they are NOT included.
+_WH_OPENERS = {
+    "what", "how", "why", "when", "where", "who", "whom", "which", "whose",
+    "is", "are", "do", "does", "did", "can", "could", "will", "would",
+    "should", "may", "might",
+}
+
+
+def _is_question(sentence: str) -> bool:
+    """True when a fragment reads as a question (never a usable answer).
+
+    Detects a trailing '?' or an interrogative opener. A genuine answer
+    sentence like "Minimum credit score requirements vary by product." is
+    not flagged (starts with "Minimum", which is not in the wh-openers).
+    """
+    s = sentence.strip()
+    if not s:
+        return False
+    if s.endswith("?"):
+        return True
+    first = s.split(" ", 1)[0].lower().rstrip("?")
+    return first in _WH_OPENERS
+
+
+def _is_heading(sentence: str) -> bool:
+    """True when a fragment is a section heading, not an answer body.
+
+    A heading is a short line with no terminal punctuation (e.g.
+    "Credit Score Requirements", "Identity Verification"). Answer body
+    sentences normally end in a period; anything without one is treated
+    as a header/fragment so it is not surfaced as an answer.
+    """
+    s = sentence.strip()
+    return bool(s) and s[-1] not in _TERMINAL_PUNCT
+
+
+def _strip_leading_heading(text: str) -> str:
+    """Drop a leading line that looks like a section heading.
+
+    FAQ/generated chunks are often ``Heading\n<answer sentence>``. When the
+    first line is a short, punctuation-free header, it is removed so the
+    answer begins at the actual sentence. Otherwise ``text`` is unchanged.
+    """
+    parts = text.split("\n", 1)
+    if len(parts) == 2:
+        first = parts[0].strip()
+        rest = parts[1].strip()
+        if first and rest and first[-1] not in _TERMINAL_PUNCT and len(first) <= 80:
+            return rest
+    return text
+
+
+def _starts_cleanly(text: str) -> bool:
+    """True when the excerpt begins at a plausible sentence boundary.
+
+    Chunks produced from the hard-cut generated QA docs often open
+    mid-word ("l mortgages", "ents.", "ransfer"); those make poor
+    answer sources. A clean start is an uppercase letter, a digit, an
+    opening quote, or a bullet/number marker.
+    """
+    stripped = (text or "").lstrip()
+    if not stripped:
+        return False
+    first = stripped[0]
+    return (
+        first.isupper()
+        or first.isdigit()
+        or first in "\"'"
+        or stripped.startswith(("*", "-", "\u2022"))
+    )
+
+
+def _extract_answer_phrase(text: str, max_chars: int = 200) -> str:
+    """Extract a single answer phrase from a source chunk text.
+
+    Prefers the first substantive (≥ 25 chars) *statement* sentence that
+    fits within ``max_chars``, skipping generated footers, chunk-boundary
+    fragments, section headings, and questions. A question or a heading is
+    never a usable answer, so if the chunk contains only those the result
+    is an empty string (the caller routes to ``no_answer``). No synthesis —
+    the phrase is always traceable to a source chunk.
+    """
+    if not text:
+        return ""
+    text = _strip_leading_heading(text)
+    fallback: list[str] = []
+    for sentence in _SENTENCE_RE.split(text):
+        s = sentence.strip()
+        if not s or _FOOTER_RE.match(s):
+            continue
+        if _is_question(s):
+            continue
+        if _is_heading(s):
+            # Section heading — never an answer, regardless of length.
+            continue
+        if len(s) > max_chars:
+            # A long statement (e.g. truncated at a chunk boundary) is still
+            # an answer — cut it at a word boundary with an ellipsis.
+            return _truncate(s, max_chars)
+        if len(s) >= 25:
+            return s
+        fallback.append(s)
+    # No substantive statement: fall back to the first short statement that
+    # is not a heading/question (e.g. "Yes."). If everything was a heading
+    # or a question, there is no answer.
+    for s in fallback:
+        if not _is_heading(s) and not _is_question(s):
+            return s
+    return ""
 
 
 def build_response_package(
@@ -77,6 +205,7 @@ def build_response_package(
     - Truncates excerpts to max_excerpt_chars
     - Computes confidence from top candidate's RRF score (0-100)
     - Extracts related questions from query entities
+    - Derives answer_phrase from the top excerpt text
     """
     max_docs = settings.max_evidence_docs
     top = candidates[:max_docs]
@@ -92,8 +221,10 @@ def build_response_package(
                 title=c.title,
                 section=c.section,
                 chunk_type=c.chunk_type,
+                department=c.department,
                 is_approved=c.is_approved,
                 document_version=c.document_version,
+                client_id=getattr(c, "client_id", None),
             ),
             confidence=round(confidence, 1),
             bm25_score=round(c.bm25_score, 4),
@@ -106,6 +237,17 @@ def build_response_package(
     # Confidence from the top candidate
     top_confidence = excerpts[0].confidence if excerpts else 0.0
 
+    # Answer phrase from the first cleanly-starting excerpt (single traced
+    # sentence). A chunk that opens mid-word is skipped so the answer never
+    # starts with a fragment like "l mortgages..." or "ents.".
+    phrase_excerpt = next(
+        (e for e in excerpts if _starts_cleanly(e.text)),
+        excerpts[0] if excerpts else None,
+    )
+    answer_phrase = (
+        _extract_answer_phrase(phrase_excerpt.text) if phrase_excerpt else ""
+    )
+
     # Generate response_id for audit tracing
     response_id = hashlib.sha256(
         f"{query_text}:{top_confidence}:{uuid.uuid4()}".encode()
@@ -114,6 +256,7 @@ def build_response_package(
     return ResponsePackage(
         response_id=response_id,
         title=title,
+        answer_phrase=answer_phrase,
         excerpts=excerpts,
         confidence=top_confidence,
         max_excerpt_chars=settings.max_excerpt_chars,

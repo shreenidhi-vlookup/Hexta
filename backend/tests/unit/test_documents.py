@@ -212,3 +212,49 @@ class TestAllowedExtensions:
         result = validate_upload("a.zip", 1024)
         assert result.valid is False
         assert "not allowed" in result.error
+
+
+class TestAutoIngest:
+    def test_trigger_spawns_ingest_batch(self, monkeypatch):
+        import subprocess
+
+        from app.documents import auto_ingest
+
+        spawned = {}
+
+        def fake_popen(cmd, **kwargs):
+            spawned["cmd"] = cmd
+            spawned["kwargs"] = kwargs
+            return object()
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+        ok = auto_ingest.trigger_ingestion("storage/pending")
+
+        assert ok is True
+        assert "-m" in spawned["cmd"]
+        assert "app.documents.ingest_batch" in spawned["cmd"]
+        assert "--queue-dir" in spawned["cmd"]
+        assert "storage/pending" in spawned["cmd"]
+        # PYTHONPATH must include the backend root so `-m` resolves
+        assert "PYTHONPATH" in spawned["kwargs"]["env"]
+
+    def test_trigger_handles_spawn_failure(self, monkeypatch):
+        import subprocess
+
+        from app.documents import auto_ingest
+
+        def boom(cmd, **kwargs):
+            raise RuntimeError("spawn failed")
+
+        monkeypatch.setattr(subprocess, "Popen", boom)
+
+        assert auto_ingest.trigger_ingestion("storage/pending") is False
+
+    def test_backend_root_points_to_backend(self):
+        from app.documents.auto_ingest import _backend_root
+
+        root = _backend_root()
+        assert root.name == "backend"
+        assert (root / "app").is_dir()
+        assert (root / "app" / "documents" / "ingest_batch.py").exists()

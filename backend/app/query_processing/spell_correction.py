@@ -38,6 +38,28 @@ _PHRASE_RATIO_THRESHOLD = 92
 _TOKEN_RE = re.compile(r"[a-z]+")
 _ALPHA_RE = re.compile(r"^[a-z]+$")
 
+def _multiword_word_vocab() -> set[str]:
+    """Single words that appear inside a multi-word alias or canonical.
+
+    Without these, a correctly-spelled common word that happens to sit
+    inside a phrase (e.g. "finance" from "bridging finance") is absent
+    from the vocab and can be fuzzy-matched into a DIFFERENT word that
+    only shares characters ("finance" → "refinance" at 87.5). Adding the
+    component words makes them correction targets too, so a typo like
+    "bridgng finance" can be repaired to "bridging finance".
+    """
+    words: set[str] = set()
+    for alias in domain_terms.multiword_aliases():
+        for w in alias.split():
+            if _ALPHA_RE.match(w) and len(w) >= _MIN_TOKEN_LEN_FOR_CORRECTION:
+                words.add(w)
+    for canon in domain_terms.DOMAIN_TERMS:
+        for w in canon.split():
+            if _ALPHA_RE.match(w) and len(w) >= _MIN_TOKEN_LEN_FOR_CORRECTION:
+                words.add(w)
+    return words
+
+
 # Vocabulary for token-level correction: only SINGLE-WORD entries.
 # Multi-word phrases are handled by the phrase-level pass, not here.
 # Using only single words prevents low ratios when comparing a short
@@ -46,6 +68,7 @@ _CORRECTION_VOCAB: list[str] = sorted(
     set(a for a in domain_terms.aliases() if " " not in a)
     | set(d for d in domain_terms.DOMAIN_TERMS.keys() if " " not in d)
     | domain_terms.COMMON_WORDS
+    | _multiword_word_vocab()
 )
 _VOCAB_SET: set[str] = set(_CORRECTION_VOCAB)
 
@@ -60,6 +83,27 @@ _MULTIWORD_VOCAB: set[str] = set(
 _MULTIWORD_ALIASES: list[str] = sorted(
     domain_terms.multiword_aliases(), key=len, reverse=True
 )
+
+# Word → set of words it co-occurs with in a known domain phrase.
+# Used to prefer a correction that completes a term the query already
+# hints at (e.g. "credit *" → "score", not the string-closer "escrow").
+_PHRASE_PARTNERS: dict[str, set[str]] = {}
+for _phrase in set(domain_terms.aliases()) | set(domain_terms.DOMAIN_TERMS):
+    _words = _phrase.split()
+    for _w in _words:
+        _PHRASE_PARTNERS.setdefault(_w, set()).update(x for x in _words if x != _w)
+
+# Score bonus a candidate earns when it completes a domain term hinted by
+# a neighbouring word. Big enough to win over a generic string match even
+# when the raw ratio is below threshold (e.g. "scro"→"score" at 66.7).
+_CONTEXT_BONUS = 20.0
+
+# Question starters are never domain content words, so a short typo that
+# fuzzy-matches one ("wht"/"wat" → "what") can be fixed safely. Domain
+# acronyms (dti/ltv/apr/fha...) top out at ratio ≤67, far below this, so
+# they are never touched.
+_SHORT_STARTER_THRESHOLD = 85
+_QUESTION_STARTER_VOCAB: list[str] = sorted(domain_terms.QUESTION_STARTERS)
 
 def _is_protected(token: str) -> bool:
     """Tokens that must never be rewritten."""
@@ -91,7 +135,29 @@ def _split_glued(token: str) -> str | None:
     return None
 
 
-def _correct_token(token: str) -> str:
+def _context_pairs(word: str, neighbors: set[str]) -> bool:
+    """True if ``word`` completes a known domain phrase with a neighbour.
+
+    e.g. for token "scro" next to "credit", the candidate "score" is a
+    partner of "credit" (via "credit score"), so it is boosted; "escrow"
+    is not, so the correct word wins even though it is string-farther.
+    """
+    partners = _PHRASE_PARTNERS.get(word)
+    if not partners:
+        return False
+    return any(n in partners for n in neighbors)
+
+
+def _correct_token(token: str, neighbors: set[str] | None = None) -> str:
+    # Short typo of a question starter (e.g. "wht"/"wat" → "what"). Runs
+    # before the generic protection so short tokens can be repaired too,
+    # while domain acronyms are untouched (their ratios are far lower).
+    if len(token) == 3:
+        best, score, _ = process.extractOne(
+            token, _QUESTION_STARTER_VOCAB, scorer=fuzz.ratio
+        )
+        if score >= _SHORT_STARTER_THRESHOLD:
+            return best
     if _is_protected(token):
         return token
     # Try glued-word recovery FIRST — "whatis" should split to "what is",
@@ -99,10 +165,18 @@ def _correct_token(token: str) -> str:
     glued = _split_glued(token)
     if glued:
         return glued
-    best, score, _ = process.extractOne(token, _CORRECTION_VOCAB, scorer=fuzz.ratio)
-    if score >= _RATIO_THRESHOLD:
-        return best
-    return token
+    neighbors = neighbors or set()
+    matches = process.extract(token, _CORRECTION_VOCAB, scorer=fuzz.ratio, limit=15)
+    best: str | None = None
+    best_eff = -1.0
+    for cand, score, _ in matches:
+        bonus = _CONTEXT_BONUS if _context_pairs(cand, neighbors) else 0.0
+        effective = score + bonus
+        if effective < _RATIO_THRESHOLD:
+            continue
+        if effective > best_eff:
+            best, best_eff = cand, effective
+    return best if best is not None else token
 
 
 def _correct_multiword_phrases(text: str) -> str:
@@ -160,7 +234,14 @@ def correct(text: str) -> str:
     if not text:
         return text
     tokens = text.split()
-    corrected_tokens = [_correct_token(t) for t in tokens]
+    corrected_tokens: list[str] = []
+    for i, token in enumerate(tokens):
+        neighbors: set[str] = set()
+        if i > 0:
+            neighbors.add(tokens[i - 1])
+        if i + 1 < len(tokens):
+            neighbors.add(tokens[i + 1])
+        corrected_tokens.append(_correct_token(token, neighbors))
     joined = " ".join(corrected_tokens)
     joined = _correct_multiword_phrases(joined)
     return re.sub(r"\s+", " ", joined).strip()
