@@ -58,6 +58,37 @@ export function listRecentChats(): RecentChat[] {
   return prune(safeParse()).sort((a, b) => b.createdAt - a.createdAt);
 }
 
+// One-time migration: chats created before per-user namespacing live under the
+// bare shared key (hexa_recent_chats). Claim them for the first logged-in user
+// so the pre-fix history isn't lost. The legacy key is removed, making this a
+// single claim — whichever user logs in first after the fix gets the history.
+export function migrateLegacyChats(): void {
+  const userId = getCurrentUserId();
+  if (userId == null) return;
+
+  const legacyKey = CHATS_STORAGE_KEY;
+  let legacy: RecentChat[];
+  try {
+    const raw = localStorage.getItem(legacyKey);
+    if (!raw) return;
+    const value = JSON.parse(raw);
+    legacy = Array.isArray(value) ? (value as RecentChat[]) : [];
+  } catch {
+    return;
+  }
+  if (legacy.length === 0) return;
+
+  try {
+    const ownRaw = localStorage.getItem(chatsKey());
+    if (ownRaw) return; // user already has chats — never overwrite
+
+    localStorage.setItem(chatsKey(), JSON.stringify(legacy));
+    localStorage.removeItem(legacyKey);
+  } catch {
+    // ignore quota/storage errors — never block the chat UI
+  }
+}
+
 export function saveChat(chat: RecentChat): void {
   const chats = prune(safeParse()).filter((c) => c.id !== chat.id);
   chats.unshift(chat);
