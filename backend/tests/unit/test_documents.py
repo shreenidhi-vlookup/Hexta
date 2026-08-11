@@ -33,6 +33,35 @@ class TestValidation:
         result = validate_upload("DOC.PDF", 1024)
         assert result.valid is True
 
+    def test_rejects_path_traversal_unix_style(self):
+        result = validate_upload("../../../etc/passwd.txt", 1024)
+        assert result.valid is False
+        assert "path separators" in result.error
+
+    def test_rejects_path_traversal_windows_style(self):
+        result = validate_upload("..\\..\\windows\\system32\\evil.txt", 1024)
+        assert result.valid is False
+        assert "path separators" in result.error
+
+    def test_rejects_embedded_slash(self):
+        result = validate_upload("storage/processed/overwrite.txt", 1024)
+        assert result.valid is False
+        assert "path separators" in result.error
+
+    def test_rejects_null_byte(self):
+        result = validate_upload("doc.txt\x00.pdf", 1024)
+        assert result.valid is False
+
+    def test_rejects_bare_dotdot(self):
+        result = validate_upload("..", 1024)
+        assert result.valid is False
+
+    def test_plain_filename_with_dots_still_valid(self):
+        # A dotted-but-otherwise-normal filename must not be caught by the
+        # traversal check.
+        result = validate_upload("v1.2.final_report.pdf", 1024)
+        assert result.valid is True
+
 
 class TestStructuralChunker:
     def test_chunk_plain_text(self):

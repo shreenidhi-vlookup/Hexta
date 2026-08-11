@@ -56,7 +56,10 @@ async def upload_document(
     pending_dir = Path(settings.storage_pending_dir)
     pending_dir.mkdir(parents=True, exist_ok=True)
 
-    unique_name = f"{uuid.uuid4().hex}_{file.filename}"
+    # Defense in depth: validate_upload already rejects filenames with path
+    # components, but strip to the basename here too so this line can never
+    # be the one that turns an unsanitized filename into a traversal write.
+    unique_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
     dest = pending_dir / unique_name
     dest.write_bytes(content)
 
