@@ -41,16 +41,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — restricted in production, permissive in dev
+# CORS — restricted in production, permissive in dev.
+#
+# allow_credentials=True is invalid combined with a wildcard origin per the
+# CORS spec (browsers reject Access-Control-Allow-Origin: * on credentialed
+# requests) — Starlette's CORSMiddleware will happily send that invalid
+# combination anyway if asked. The app authenticates via a Bearer header,
+# never cookies, so no request needs credentialed CORS in the wildcard
+# (development) case; only an explicit origin list turns it on.
 if settings.cors_origins == "*":
     allow_origins = ["*"]
+    allow_credentials = False
 else:
     allow_origins = settings.cors_origins.split(",")
+    allow_credentials = True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
