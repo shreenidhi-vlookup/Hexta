@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import type { AdminSection } from "@/components/nav/HomeSidebar";
 import { RefreshCw, CheckCircle } from "lucide-react";
 import UploadForm from "./UploadForm";
+import CreateUserForm from "./CreateUserForm";
 import { acknowledgeGap } from "@/lib/api-client";
 
 interface AdminPanelState {
@@ -387,7 +388,14 @@ export function AdminSections({ active }: { active: AdminSection | "settings" | 
 
       case "users":
         return (
-          <DataTable<AdminUser>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Create and manage user accounts and roles.
+              </p>
+              <CreateUserForm onSuccess={refresh} />
+            </div>
+            <DataTable<AdminUser>
             columns={[
               { key: "id", header: "ID", render: (r) => <span className="text-muted-foreground">{r.id}</span> },
               { key: "name", header: "User", render: (r) => (
@@ -407,6 +415,7 @@ export function AdminSections({ active }: { active: AdminSection | "settings" | 
             rows={users}
             empty="No users found"
           />
+          </div>
         );
 
        case "documents":
