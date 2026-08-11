@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app.query_processing import domain_terms
 from app.query_processing import entity_extraction as ent
 from app.query_processing import intent_detection, multi_question, normalization
 from app.query_processing import query_expansion as qexpand
@@ -46,6 +47,9 @@ def _build_sub_query(sub: str) -> StructuredQuery:
     text = normalization.clean_for_search(display)
     entities = ent.extract_entities(text)
     expanded = qexpand.expand(text, entities)
+    scenario = domain_terms.scenario_concepts_for(text)
+    if scenario:
+        expanded = " ".join([expanded, *scenario])
     intent = intent_detection.detect_intent(text, entities)
     tokens = text.split()
     return StructuredQuery(

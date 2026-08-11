@@ -1,12 +1,14 @@
 """Search endpoint — full pipeline implementation.
 
 Pipeline (no LLM anywhere in the serving path):
-  query_processing.process_query →
-  search.hybrid_orchestrator.search_knowledge_base →
-  ranking.rrf.rank_fusion →
-  ranking.reranker.rerank (optional, cross-encoder) →
-  response.package_builder.build_response_package →
-  response.validation.validate_package →
+  coreference resolution (conversation context) →
+  query_processing.process_query (normalize → split → per sub-query:
+    spell-correct → entities → intent → expansion + scenario concepts) →
+  per sub-query: search.hybrid_orchestrator.search_knowledge_base →
+    ranking.rrf.rank_fusion → ranking.reranker.rerank (optional) →
+    response.package_builder.build_response_package →
+    response.validation.validate_package →
+  response assembly (per-question answer blocks, completeness check) →
   audit.audit_logger.log_query
 
 Every response field traces back verbatim to a source chunk.
@@ -14,7 +16,10 @@ Every response field traces back verbatim to a source chunk.
 
 from __future__ import annotations
 
+import hashlib
+import re
 import time
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -26,10 +31,13 @@ from app.config import settings
 from app.db.postgres.session import acquire
 from app.dependencies import require_auth
 from app.knowledge_gap.gap_detector import detect_and_log
+from app.query_processing import alias_resolver, domain_terms
+from app.query_processing import comparison, coreference
 from app.query_processing.pipeline import process_query
 from app.ranking.reranker import rerank
 from app.ranking.rrf import rank_fusion
 from app.response.confidence_thresholds import route_by_confidence
+from app.response.followup_questions import has_domain_topic, suggest_followups
 from app.response.package_builder import build_response_package
 from app.response.validation import validate_package
 from app.search.hybrid_orchestrator import search_knowledge_base
@@ -37,69 +45,48 @@ from app.search.hybrid_orchestrator import search_knowledge_base
 router = APIRouter()
 
 
+class HistoryTurn(BaseModel):
+    """One prior (user question, assistant answer) turn."""
+
+    question: str
+    answer: str | None = None
+
+
 class SearchRequest(BaseModel):
     query: str
+    history: list[HistoryTurn] = []
+
+
+class AnswerBlock(BaseModel):
+    """A single answer for a single sub-question."""
+
+    question: str
+    title: str
+    answer_phrase: str
+    excerpts: list[dict]
+    confidence: float
+    routing: str
 
 
 class SearchResponse(BaseModel):
     response_id: str
+    answers: list[AnswerBlock]
     title: str
+    answer_phrase: str
     excerpts: list[dict]
     confidence: float
     routing: str
     related_questions: list[str]
+    answered: int
+    total: int
+    comparison: bool = False
 
 
-@router.post("/", response_model=SearchResponse)
-async def search(
-    request: SearchRequest,
-    user: Annotated[dict, Depends(require_auth)],
-) -> SearchResponse:
-    """Search the knowledge base for the user's query.
-
-    Returns a ResponsePackage with retrieved excerpts — never synthesized
-    text. Full pipeline: process_query → hybrid_search → rrf_rank →
-    package_builder → validate → audit_log.
-    """
-    start_ms = time.time() * 1000
-
-    # Phase 3: Query processing (pure function, no I/O)
-    plan = process_query(request.query)
-
-    if not plan.sub_queries:
-        log_query(AuditLogEntry(
-            user_id=user["id"],
-            query=request.query,
-            sub_queries=[],
-            retrieved_ids=[],
-            confidence=0.0,
-            response_id="",
-            outcome="no_sub_queries",
-            latency_ms=time.time() * 1000 - start_ms,
-        ))
-        return SearchResponse(
-            response_id="",
-            title="No Results",
-            excerpts=[],
-            confidence=0.0,
-            routing="no_answer",
-            related_questions=[],
-        )
-
-    sub_query_texts = [sq.expanded for sq in plan.sub_queries]
-
-    # Phase 4: Hybrid search (BM25 + pgvector, single SQL query)
-    with acquire() as conn:
-        result = search_knowledge_base(
-            conn=conn,
-            sub_queries=sub_query_texts,
-            user=user,
-        )
-
-    # Build lookup for ranking
+def _rank_sub_query(conn, text: str, user: dict):
+    """Run hybrid search + RRF for a single sub-query text."""
+    result = search_knowledge_base(conn=conn, sub_queries=[text], user=user)
     chunk_lookup = {c.chunk_id: c.__dict__ for c in result.candidates}
 
-    # Phase 4: RRF rank fusion
     bm25_ranked = sorted(
         [(c.chunk_id, c.bm25_score) for c in result.candidates],
         key=lambda x: x[1],
@@ -110,83 +97,308 @@ async def search(
         key=lambda x: x[1],
         reverse=True,
     )
-
     ranked = rank_fusion(
         bm25_ranked=bm25_ranked,
         vector_ranked=vector_ranked,
         chunk_lookup=chunk_lookup,
     )
+    return _apply_fragment_penalty(ranked)
 
-    # Optional cross-encoder reranking (Phase 4b)
+
+# Words that make a question a "bare follow-up": it carries no topic of
+# its own after question-starters and common words are removed. Such a
+# question is unanswerable in isolation ("what happens next?"), so its
+# RRF score (which is inflated for short generic queries) must not be
+# presented as a high-confidence answer.
+_BARE_FOLLOWUP_WORDS = frozenset((
+    "this", "that", "it", "its", "these", "those", "them", "they",
+    "you", "your", "me", "my", "we", "us", "ours",
+    "work", "works", "working", "workings",
+    "happen", "happens", "happened", "next", "then", "afterwards",
+    "mean", "means", "meant", "meaning", "explain", "explained",
+    "explanation", "actually", "exactly", "simply", "basically",
+    "more", "further", "else", "anything", "something", "thing", "things",
+    "about", "info", "information", "details", "detail", "relevant",
+    "rules", "rule", "go", "goes", "going", "fine", "okay", "ok",
+))
+
+# Cap confidence for bare follow-ups so they never route as a full answer.
+_BARE_FOLLOWUP_CONFIDENCE_CAP = 74.0
+
+# Chunks whose content begins with a lowercase letter start mid-word —
+# the generated QA source documents were hard-cut at ~500 chars, so a
+# chunk often opens with a word fragment ("l mortgages", "ents.",
+# "ransfer"). Such chunks over-match keyword queries but make poor answer
+# sources; their RRF score is dampened so cleanly-starting chunks surface.
+_FRAGMENT_START_RE = re.compile(r"^[a-z]")
+_FRAGMENT_FOOTER_START_RE = re.compile(r"^\(\s*generated")
+# How much of the RRF score a fragment-starting chunk retains.
+_FRAGMENT_PENALTY = 0.35
+
+
+def _apply_fragment_penalty(ranked: list) -> list:
+    """Dampen RRF scores of chunks that start mid-word, then re-rank."""
+    for c in ranked:
+        content = (c.content or "").lstrip()
+        if content and (
+            _FRAGMENT_START_RE.match(content)
+            or _FRAGMENT_FOOTER_START_RE.match(content)
+        ):
+            c.rrf_score = c.rrf_score * _FRAGMENT_PENALTY
+    ranked.sort(key=lambda c: c.rrf_score, reverse=True)
+    return ranked
+
+
+def _content_words(question: str) -> list[str]:
+    """Non-question-starter, non-common words in a question (its 'content')."""
+    words = [w for w in re.split(r"[^a-z']+", question.lower()) if w]
+    return [
+        w for w in words
+        if w not in domain_terms.QUESTION_STARTERS
+        and w not in domain_terms.COMMON_WORDS
+    ]
+
+
+def _is_bare_followup(question: str) -> bool:
+    """True when the question reduces to ≤2 generic words after removing
+    question starters and common words (i.e. it names no real subject)."""
+    content = _content_words(question)
+    return 1 <= len(content) <= 2 and all(w in _BARE_FOLLOWUP_WORDS for w in content)
+
+
+def _dampen_generic_confidence(
+    question: str,
+    answer_text: str,
+    confidence: float,
+) -> float:
+    """Cap the confidence of a question that has no real subject.
+
+    Two cases are caught:
+    1. A bare follow-up ("what happens next?") — no content at all.
+    2. An off-topic question with no domain topic whose top excerpt
+       shares none of the question's content words ("what is the
+       weather like?"). Its RRF score is inflated by common words, so
+       presenting it as a high-confidence answer would be misleading.
+    """
+    if _is_bare_followup(question):
+        return min(confidence, _BARE_FOLLOWUP_CONFIDENCE_CAP)
+    if has_domain_topic(question):
+        return confidence
+    content = _content_words(question)
+    if not content:
+        return confidence
+    haystack = (answer_text or "").lower()
+    if any(w in haystack for w in content):
+        return confidence
+    return min(confidence, _BARE_FOLLOWUP_CONFIDENCE_CAP)
+
+
+# --- Phase B: query↔answer relevance gate -------------------------------
+
+# Minimal stopwords dropped from a query when computing relevance. Kept
+# intentionally small so meaningful domain words ("employment", "income",
+# "loan", "credit", "jumbo") are preserved for overlap with the answer.
+_RELEVANCE_STOP = frozenset((
+    "a", "an", "the", "and", "or", "of", "for", "to", "with", "by",
+    "in", "at", "on", "it", "its", "you", "your", "me", "my", "we",
+    "us", "our", "them", "their", "they", "is", "are", "was", "were",
+))
+
+
+def _query_content_terms(question: str) -> set[str]:
+    """Significant content tokens in a question (drop starters + stopwords).
+
+    Domain abbreviations are expanded to their canonical words so a query
+    term like "dti" also matches an answer that spells out "debt-to-income".
+    """
+    toks = re.split(r"[^a-z']+", (question or "").lower())
+    terms: set[str] = set()
+    for t in toks:
+        if len(t) < 3 or t in domain_terms.QUESTION_STARTERS or t in _RELEVANCE_STOP:
+            continue
+        terms.add(t)
+        canon = domain_terms.canonical_of(t)
+        if canon != t:
+            terms.update(
+                w for w in canon.split()
+                if len(w) >= 3 and w not in _RELEVANCE_STOP
+            )
+    return terms
+
+
+def _term_stem_candidates(term: str) -> set[str]:
+    """Light derivational-suffix variants of a term for matching.
+
+    Lets morphological variants of the same root match the answer text
+    ("applicant" ↔ "applications", "payment" ↔ "payments") without a full
+    stemmer. Falls back to the bare term when it cannot strip a suffix.
+    """
+    candidates: set[str] = {term}
+    if len(term) <= 3:
+        return candidates
+    for suffix, extra in (
+        ("ies", ("y",)),
+        ("tion", ("", "e")),
+        ("ment", ("",)),
+        ("ant", ("", "at")),
+        ("ent", ("", "et")),
+        ("es", ("",)),
+        ("ing", ("", "e")),
+        ("ed", ("", "e")),
+        ("er", ("",)),
+        ("or", ("",)),
+        ("s", ("",)),
+    ):
+        if term.endswith(suffix) and len(term) > len(suffix) + 2:
+            root = term[: -len(suffix)]
+            candidates.update(root + e for e in extra)
+    return candidates
+
+
+def _term_present(term: str, hay: str) -> bool:
+    """Presence of a query term (and its light stems) in the answer."""
+    return any(c in hay for c in _term_stem_candidates(term))
+
+
+def _relevance_factor(question: str, answer_text: str) -> float:
+    """Fraction of the query's content terms present in the answer, in [0,1].
+
+    1.0 means every significant query term appears in the answer (clearly
+    on-topic). 0.0 means none do (off-topic retrieval — the RRF score was
+    inflated by common words or a wrong domain subtopic).
+    """
+    terms = _query_content_terms(question)
+    if not terms:
+        return 1.0
+    hay = (answer_text or "").lower()
+    if not hay:
+        return 0.0
+    matched = sum(1 for t in terms if _term_present(t, hay))
+    return matched / len(terms)
+
+
+def _recalibrate_confidence(confidence: float, relevance: float) -> float:
+    """Scale confidence down for weak query↔answer relevance (never up).
+
+    Piecewise so on-topic answers are preserved while off-topic chunks are
+    punished hard:
+      * relevance ≥ 0.70  → unchanged.  (On-topic answers with a few
+        morphological misses stay above the 'answer' threshold.)
+      * 0.35 ≤ rel < 0.70 → mild linear drop  (→ ~55% at 0.35, → 100% at 0.70).
+      * rel < 0.35        → aggressive drop   (→ 35% at 0.0).  A wrong-topic
+        but top-ranked chunk can no longer keep a ~100 score.
+    """
+    if relevance >= 0.70:
+        return confidence
+    if relevance >= 0.35:
+        factor = 0.55 + (relevance - 0.35) / 0.35 * 0.45
+        return confidence * factor
+    factor = 0.35 + relevance / 0.35 * 0.20
+    return confidence * factor
+
+
+def _apply_relevance_gate(
+    question: str,
+    answer_phrase: str,
+    top_excerpt: str,
+    confidence: float,
+) -> float:
+    """Recalibrate confidence by how well the answer covers the question.
+
+    Falls back to the top excerpt text when no answer phrase was extracted.
+    """
+    evidence = answer_phrase or top_excerpt or ""
+    relevance = _relevance_factor(question, evidence)
+    return _recalibrate_confidence(confidence, relevance)
+
+
+# --- Phase C: routing safety ---------------------------------------------
+
+# Below this query↔answer relevance the retrieved content is considered
+# off-topic and must not be presented as an answer (no-fabrication rule).
+_NO_ANSWER_RELEVANCE = 0.35
+
+
+def _decide_routing(
+    question: str,
+    answer_phrase: str,
+    top_excerpt: str,
+    confidence: float,
+) -> str:
+    """Decide routing with safety overrides, never fabricating an answer.
+
+    Forces ``no_answer`` when:
+      * there is no usable answer phrase (Phase A extracted only
+        questions/headings → empty), or
+      * the retrieved content shares almost no content terms with the
+        question (off-topic retrieval that slipped through ranking).
+    Otherwise confidence routing (``answer`` | ``partial``) applies.
+    """
+    if not (answer_phrase or "").strip():
+        return "no_answer"
+    relevance = _relevance_factor(question, answer_phrase or top_excerpt or "")
+    if relevance < _NO_ANSWER_RELEVANCE:
+        return "no_answer"
+    return route_by_confidence(confidence)
+
+
+def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[AnswerBlock, list[int]]:
+    """Build one AnswerBlock for a sub-question (search + rank + validate).
+
+    Returns ``(block, retrieved_chunk_ids)``.
+    """
+    ranked = _rank_sub_query(conn, search_text, user)
+
     if settings.rerank_enabled and ranked:
         rerank_candidates = [
             {"chunk_id": c.chunk_id, "content": c.content}
             for c in ranked[: settings.bm25_limit]
         ]
         rerank_result = rerank(
-            query=request.query,
+            query=question,
             candidates=rerank_candidates,
             top_k=min(10, len(rerank_candidates)),
         )
         rerank_order = {c["chunk_id"]: i for i, c in enumerate(rerank_result)}
-        ranked.sort(
-            key=lambda c: rerank_order.get(c.chunk_id, len(rerank_order)),
-        )
-
-    # Phase 5: Package + validate
+        ranked.sort(key=lambda c: rerank_order.get(c.chunk_id, len(rerank_order)))
 
     user_depts = resolve_user_departments(user)
     package = build_response_package(
         candidates=ranked,
-        query_text=request.query,
+        query_text=question,
         user_departments=user_depts,
     )
+    package.confidence = _dampen_generic_confidence(
+        question,
+        package.excerpts[0].text if package.excerpts else "",
+        package.confidence,
+    )
+    # Phase B: relevance gate — scale confidence by how well the answer
+    # covers the question's content terms (never raises it).
+    package.confidence = _apply_relevance_gate(
+        question,
+        package.answer_phrase,
+        package.excerpts[0].text if package.excerpts else "",
+        package.confidence,
+    )
+    package.routing = _decide_routing(
+        question,
+        package.answer_phrase,
+        package.excerpts[0].text if package.excerpts else "",
+        package.confidence,
+    )
 
-    package.routing = route_by_confidence(package.confidence)
-
-    # Knowledge gap detection (best-effort — never raises)
-    intent = plan.sub_queries[0].intent if plan.sub_queries else "general"
-    if package.routing in ("no_answer", "partial"):
-        detect_and_log(
-            query=request.query,
-            intent=intent,
-            confidence=package.confidence,
-        )
-
-    # Safety-net validation
     valid, reason = validate_package(package, user)
     if not valid:
-        log_query(AuditLogEntry(
-            user_id=user["id"],
-            query=request.query,
-            sub_queries=[sq.display for sq in plan.sub_queries],
-            retrieved_ids=[],
-            confidence=0.0,
-            response_id=package.response_id,
-            outcome=f"validation_failed:{reason}",
-            latency_ms=time.time() * 1000 - start_ms,
-        ))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Response validation failed: {reason}",
         )
 
-    # Audit log
-    latency_ms = time.time() * 1000 - start_ms
-    log_query(AuditLogEntry(
-        user_id=user["id"],
-        query=request.query,
-        sub_queries=[sq.display for sq in plan.sub_queries],
-        retrieved_ids=[c.chunk_id for c in ranked[:25]],
-        confidence=round(package.confidence, 1),
-        response_id=package.response_id,
-        outcome=package.routing,
-        latency_ms=round(latency_ms, 1),
-    ))
-
-    return SearchResponse(
-        response_id=package.response_id,
+    block = AnswerBlock(
+        question=question,
         title=package.title,
+        answer_phrase=package.answer_phrase,
         excerpts=[
             {
                 "text": e.text,
@@ -201,5 +413,139 @@ async def search(
         ],
         confidence=package.confidence,
         routing=package.routing,
-        related_questions=[sq.display for sq in plan.sub_queries[:3]] if plan.sub_queries else [],
+    )
+    return block, [c.chunk_id for c in ranked[:25]]
+
+
+def _pick_primary(blocks: list[AnswerBlock]) -> AnswerBlock | None:
+    """Best block: highest-confidence answered block, else highest-confidence."""
+    if not blocks:
+        return None
+    answered = [b for b in blocks if b.routing in ("answer", "partial")]
+    pool = answered or blocks
+    return max(pool, key=lambda b: b.confidence)
+
+
+@router.post("/", response_model=SearchResponse)
+async def search(
+    request: SearchRequest,
+    user: Annotated[dict, Depends(require_auth)],
+) -> SearchResponse:
+    """Search the knowledge base for the user's query.
+
+    Returns one AnswerBlock per identified sub-question. Every answer is
+    extracted verbatim from a source chunk — never synthesized. The
+    top-level fields mirror the primary (best) block for compatibility
+    with single-question clients.
+    """
+    start_ms = time.time() * 1000
+
+    history = [h.model_dump() for h in request.history] if request.history else []
+    raw = coreference.resolve_references(request.query, history)
+    plan = process_query(raw)
+
+    if not plan.sub_queries:
+        log_query(AuditLogEntry(
+            user_id=user["id"],
+            query=request.query,
+            sub_queries=[],
+            retrieved_ids=[],
+            confidence=0.0,
+            response_id="",
+            outcome="no_sub_queries",
+            latency_ms=time.time() * 1000 - start_ms,
+        ))
+        return SearchResponse(
+            response_id="",
+            answers=[],
+            title="No Results",
+            answer_phrase="",
+            excerpts=[],
+            confidence=0.0,
+            routing="no_answer",
+            related_questions=[],
+            answered=0,
+            total=0,
+            comparison=False,
+        )
+
+    # Build the list of (question_label, search_text) units.
+    # A comparison sub-question expands into two operand units.
+    work: list[tuple[str, str]] = []
+    is_comparison = (
+        len(plan.sub_queries) == 1
+        and comparison.is_comparison(plan.sub_queries[0].text)
+    )
+    for sq in plan.sub_queries:
+        operands = comparison.extract_comparison_operands(sq.text)
+        if operands:
+            left, right = operands
+            work.append((left, left))
+            work.append((right, right))
+        else:
+            work.append((sq.display, sq.expanded))
+
+    blocks: list[AnswerBlock] = []
+    retrieved_ids: list[int] = []
+
+    with acquire() as conn:
+        for question, search_text in work:
+            # Enrich with doc-derived aliases (e.g. acronyms like SAR).
+            extra = alias_resolver.resolve_doc_aliases(conn, search_text)
+            enriched = " ".join(
+                [search_text] + [e for e in extra if e not in search_text]
+            ).strip()
+            block, block_ids = _build_block(conn, question, enriched or search_text, user)
+            blocks.append(block)
+            retrieved_ids.extend(block_ids)
+
+        # Topic-appropriate follow-up suggestions (verified against the KB).
+        related_questions = suggest_followups(conn, [sq.text for sq in plan.sub_queries])
+
+    primary = _pick_primary(blocks)
+    primary = primary or AnswerBlock(
+        question="", title="No Results Found", answer_phrase="",
+        excerpts=[], confidence=0.0, routing="no_answer",
+    )
+
+    answered = sum(1 for b in blocks if b.routing in ("answer", "partial"))
+    total = len(blocks)
+    response_id = hashlib.sha256(
+        f"{raw}:{primary.confidence}:{uuid.uuid4()}".encode()
+    ).hexdigest()[:16]
+
+    # Knowledge gap detection (best-effort — never raises).
+    for block in blocks:
+        if block.routing in ("no_answer", "partial"):
+            detect_and_log(
+                query=block.question or raw,
+                intent="general",
+                confidence=block.confidence,
+            )
+
+    # Audit log (single entry per request, aggregated).
+    latency_ms = time.time() * 1000 - start_ms
+    log_query(AuditLogEntry(
+        user_id=user["id"],
+        query=request.query,
+        sub_queries=[sq.display for sq in plan.sub_queries],
+        retrieved_ids=retrieved_ids[:25],
+        confidence=round(primary.confidence, 1),
+        response_id=response_id,
+        outcome=primary.routing,
+        latency_ms=round(latency_ms, 1),
+    ))
+
+    return SearchResponse(
+        response_id=response_id,
+        answers=blocks,
+        title=primary.title,
+        answer_phrase=primary.answer_phrase,
+        excerpts=primary.excerpts,
+        confidence=primary.confidence,
+        routing=primary.routing,
+        related_questions=related_questions,
+        answered=answered,
+        total=total,
+        comparison=is_comparison,
     )

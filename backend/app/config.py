@@ -60,7 +60,9 @@ class Settings(BaseSettings):
     # --- Search ---
     bm25_limit: int = 25
     vector_limit: int = 25
-    max_sub_queries: int = 4
+    max_sub_queries: int = 6
+    max_history_turns: int = 4
+    max_alias_ngram: int = 3
 
     # --- Response ---
     max_excerpt_chars: int = 600

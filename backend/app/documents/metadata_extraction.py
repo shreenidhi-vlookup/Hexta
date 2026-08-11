@@ -19,6 +19,9 @@ class DocumentMetadata:
     doc_type: str = "policy"
     department: str = "general"
     source_path: str | None = None
+    client_id: str | None = None
+    property_id: str | None = None
+    case_id: str | None = None
 
 
 _TITLE_PATTERNS = [

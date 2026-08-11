@@ -46,11 +46,16 @@ nlp_models/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/tsconfig.tsbuildinfo
 
 # Coverage
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Generated artifacts
+evaluation/reports/
+SESSION_SUMMARY.md
 
 # Local development data
 backend/storage/

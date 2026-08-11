@@ -30,17 +30,26 @@ from app.query_processing import domain_terms
 _BOUNDARY_RE = re.compile(
     r"([?!;\n])"
     r"|((?<!\d),(?!\d))"
-    r"|((?<=\s)(and|also|plus|or|additionally)(?=\s))"
+    r"|((?<=\s)(and|also|plus|or|additionally|as well as|then)(?=\s))"
 )
 
 _HARD = frozenset("?!;")
-_CONJUNCTIONS = frozenset(("and", "also", "plus", "or", "additionally"))
+_CONJUNCTIONS = frozenset(("and", "also", "plus", "or", "additionally", "as well as", "then"))
 
 _CONNECTIVE_PREFIX_RE = re.compile(
     r"^(?:and|also|plus|or|additionally|in addition|then)\s+"
 )
 
 _INFOVERBS = frozenset(("tell", "list", "show", "give", "provide"))
+
+# Info-nouns that make a noun phrase read as a self-contained information
+# request ("required documents", "first time buyer programs", "max dti").
+_INFO_NOUNS = frozenset((
+    "documents", "document", "requirements", "requirement", "programs", "program",
+    "ratio", "ratios", "score", "scores", "rates", "rate", "guidelines", "rules",
+    "rule", "limits", "limit", "process", "steps", "eligibility", "criteria",
+    "checklist", "forms", "form", "timeline", "timelines",
+))
 
 
 def _strip_connectives(text: str) -> str:
@@ -63,6 +72,30 @@ def is_independent_clause(fragment: str) -> bool:
         return True
     words = set(frag.split())
     if words & _INFOVERBS:
+        return True
+    return False
+
+
+def is_self_contained_request(text: str) -> bool:
+    """True when a noun phrase names a complete information request.
+
+    ``"max dti"`` (limit), ``"required documents"`` (ends in an info-noun)
+    and ``"first time buyer programs"`` are each self-contained intents.
+    ``"income"`` or ``"employment"`` alone are bare attributes, not
+    complete requests, so they keep a list together instead of splitting.
+    """
+    frag = (text or "").strip().lower()
+    if not frag:
+        return False
+    first = frag.split()[0]
+    if first in ("max", "min", "maximum", "minimum"):
+        return True
+    words = set(frag.split())
+    if words & _INFO_NOUNS:
+        return True
+    # A single-word domain metric alias ("dti", "ltv", "apr" ...) is a
+    # concrete, answerable quantity in itself.
+    if any(domain_terms.type_of(tok) == "metric" for tok in words):
         return True
     return False
 
@@ -104,6 +137,17 @@ def split_questions(norm: str) -> list[str]:
         else:  # conjunction word
             candidate = _strip_connectives(text)
             if candidate and is_independent_clause(candidate):
+                questions.append(current)
+                current = candidate
+            elif (
+                candidate
+                and is_self_contained_request(current)
+                and is_self_contained_request(candidate)
+            ):
+                # Terse noun-phrase requests joined by "and" are distinct
+                # intents ("max dti and required documents and first time
+                # buyer programs"). Only split when BOTH sides are complete
+                # requests so list continuations stay merged.
                 questions.append(current)
                 current = candidate
             else:

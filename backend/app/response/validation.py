@@ -13,7 +13,7 @@ every "no answer found" query returns HTTP 500 instead of a graceful
 
 from __future__ import annotations
 
-from app.auth.rbac import is_admin, resolve_user_departments
+from app.auth.rbac import is_admin, is_client, resolve_user_departments, resolve_user_client_id
 from app.response.package_builder import ResponsePackage
 
 
@@ -35,6 +35,18 @@ def validate_package(
     # RBAC check — safety net (primary enforcement is in the SQL WHERE clause)
     if user is not None and not is_admin(user):
         user_depts = set(resolve_user_departments(user))
+
+        # Client scope: clients must never see another client's data.
+        user_client_id = resolve_user_client_id(user)
+        if user_client_id is not None:
+            for excerpt in package.excerpts:
+                cid = excerpt.source.client_id
+                if cid is not None and cid != user_client_id:
+                    return False, (
+                        f"RBAC violation: chunk {excerpt.source.chunk_id} "
+                        f"belongs to client_id '{cid}', not '{user_client_id}'"
+                    )
+
         for excerpt in package.excerpts:
             if excerpt.source.department and excerpt.source.department not in user_depts:
                 return False, f"RBAC violation: chunk from department '{excerpt.source.department}' not visible to user"

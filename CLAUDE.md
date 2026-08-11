@@ -18,8 +18,12 @@ Companion docs (read these for full detail, this file is the summary):
 
 **"Find the right information, don't generate new information."**
 
-- No LLM call anywhere in the request-serving path. No `Answer` field —
+- No generative LLM call anywhere in the request-serving path. No `Answer` field —
   only `Response Package` (retrieved excerpts, never synthesized text).
+- Runtime extractive summarization (LexRank/TextRank/LSA via Sumy) is allowed
+  in the serving path to produce a single answer phrase from retrieved chunks.
+  The summary sentences must be selected directly from the retrieved content,
+  not invented or paraphrased.
 - If you find yourself writing code that assembles a sentence from
   multiple sources or paraphrases retrieved content, stop — that's
   generation, and it violates the core compliance guarantee of this system.
@@ -48,7 +52,9 @@ Companion docs (read these for full detail, this file is the summary):
    `backend/app/documents/ingest_batch.py`), never inside `app/main.py` or
    any request handler. The API's `documents/upload.py` only validates and
    writes to `storage/pending/` — it must not call the ingestion pipeline
-   directly.
+   directly. After writing, it may auto-trigger ingestion by spawning the
+   batch script as a **detached subprocess** (`app.documents.auto_ingest.trigger_ingestion`),
+   keeping the embedding model out of the serving process.
 6. **Cross-encoder reranking has a <200ms p95 latency budget.** Any change
    to the reranker (model swap, candidate count, precision) must be
    checked against this budget via `evaluation/metrics/latency_benchmark.py`

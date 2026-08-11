@@ -34,4 +34,7 @@ def chunk_row_to_candidate(row: dict) -> dict:
         "content": row["content"],
         "bm25_score": row.get("bm25_score"),
         "vec_score": row.get("vec_score"),
+        "client_id": row.get("client_id"),
+        "is_approved": row.get("is_approved"),
+        "document_version": row.get("document_version"),
     }

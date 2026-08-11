@@ -37,6 +37,7 @@ class SearchCandidate:
     document_version: int
     bm25_score: float
     vec_score: float
+    client_id: str | None = None
 
 
 @dataclass
@@ -91,7 +92,7 @@ def search_knowledge_base(
     SELECT c.id, c.document_id, d.title, d.doc_type, c.section,
            c.chunk_type, c.content, c.department,
            c.is_approved AS chunk_is_approved,
-           d.version AS document_version,
+           d.client_id, d.version AS document_version,
            ts_rank_cd(c.fts, to_tsquery('english', %s)) AS bm25_score,
            1 - (c.embedding <=> %s) AS vec_score
     FROM document_chunks c
@@ -131,6 +132,7 @@ def search_knowledge_base(
             document_version=int(row["document_version"] or 1),
             bm25_score=float(row["bm25_score"] or 0.0),
             vec_score=float(row["vec_score"] or 0.0),
+            client_id=row["client_id"],
         ))
 
     logger.info(

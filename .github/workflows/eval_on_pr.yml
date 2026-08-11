@@ -72,7 +72,7 @@ jobs:
         run: |
           python -m evaluation.run_benchmark --output-dir evaluation/reports
 
-      - name: Check for regression
+- name: Check for regression
         run: |
           python -c "
           import json, glob
@@ -85,11 +85,12 @@ jobs:
           latest_summary = latest.get('summary', {})
           previous_summary = previous.get('summary', {})
           threshold = 0.05
+          regression = False
           for metric in ['sub_question_accuracy', 'intent_accuracy', 'entity_accuracy']:
               delta = latest_summary.get(metric, 0) - previous_summary.get(metric, 0)
               if delta < -threshold:
                   print(f'REGRESSION: {metric} dropped by {delta:.3f} (threshold: -{threshold})')
-                  exit(1)
+                  regression = True
               print(f'{metric}: {previous_summary.get(metric, 0):.3f} -> {latest_summary.get(metric, 0):.3f} (delta: {delta:+.3f})')
           # Check retrieval metrics if available
           latest_retrieval = latest.get('retrieval_metrics', {})
@@ -98,7 +99,20 @@ jobs:
               delta = latest_retrieval['hit_rate@10'] - previous_retrieval['hit_rate@10']
               if delta < -threshold:
                   print(f'REGRESSION: hit_rate@10 dropped by {delta:.3f} (threshold: -{threshold})')
-                  exit(1)
+                  regression = True
               print(f'hit_rate@10: {previous_retrieval[\"hit_rate@10\"]:.3f} -> {latest_retrieval[\"hit_rate@10\"]:.3f} (delta: {delta:+.3f})')
+          # Absolute floor thresholds (fail if below)
+          floors = {
+              'hit_rate@10': 0.85,
+              'mrr': 0.70,
+              'ndcg@10': 0.80,
+          }
+          for metric, floor in floors.items():
+              val = latest_retrieval.get(metric)
+              if val is not None and val < floor:
+                  print(f'THRESHOLD BREACH: {metric}={val:.3f} < floor={floor}')
+                  regression = True
+          if regression:
+              exit(1)
           print('No significant regression detected')
           "

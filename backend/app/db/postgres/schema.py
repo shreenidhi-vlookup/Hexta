@@ -41,7 +41,7 @@ DDL_STATEMENTS: list[str] = [
         doc_type   TEXT NOT NULL DEFAULT 'policy',
         department TEXT NOT NULL DEFAULT 'general',
         is_active  BOOLEAN NOT NULL DEFAULT true,
-        is_approved BOOLEAN NOT NULL DEFAULT true,
+        is_approved BOOLEAN NOT NULL DEFAULT false,
         version    INTEGER NOT NULL DEFAULT 1,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
@@ -53,12 +53,13 @@ DDL_STATEMENTS: list[str] = [
         document_id  BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
         content      TEXT NOT NULL,
         content_hash TEXT NOT NULL UNIQUE,
+        summary      TEXT,
         embedding    vector(384),
         section      TEXT,
         chunk_type   TEXT NOT NULL DEFAULT 'paragraph',
         department   TEXT NOT NULL DEFAULT 'general',
         is_active    BOOLEAN NOT NULL DEFAULT true,
-        is_approved  BOOLEAN NOT NULL DEFAULT true,
+        is_approved  BOOLEAN NOT NULL DEFAULT false,
         created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
         fts          tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
     )
@@ -96,7 +97,29 @@ DDL_STATEMENTS: list[str] = [
         query      TEXT NOT NULL,
         intent     TEXT,
         confidence DOUBLE PRECISION,
+        acknowledged BOOLEAN NOT NULL DEFAULT false,
+        acknowledged_by BIGINT REFERENCES users(id),
+        acknowledged_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    # --- User settings (per-user UI preferences) ---
+    """
+    CREATE TABLE IF NOT EXISTS user_settings (
+        id                  BIGSERIAL PRIMARY KEY,
+        user_id             BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        show_related_questions BOOLEAN NOT NULL DEFAULT true,
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    # --- Doc-derived aliases / acronyms (harvested at ingestion) ---
+    """
+    CREATE TABLE IF NOT EXISTS term_aliases (
+        id                  BIGSERIAL PRIMARY KEY,
+        alias               TEXT NOT NULL UNIQUE,
+        canonical           TEXT NOT NULL,
+        document_id         BIGINT REFERENCES documents(id) ON DELETE CASCADE,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
 ]
@@ -107,6 +130,31 @@ INDEX_STATEMENTS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_chunks_fts ON document_chunks USING gin (fts)",
     "CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON document_chunks USING hnsw (embedding vector_cosine_ops)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_chunks_content_hash ON document_chunks (content_hash)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_settings_user_id ON user_settings (user_id)",
+]
+
+
+# Phase 3a: Add client/audience columns (nullable, IF NOT EXISTS to preserve data).
+# D5: idempotent ALTER TABLE ADD COLUMN IF NOT EXISTS in schema.py.
+ALTER_STATEMENTS: list[str] = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS client_id TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_clients TEXT[] NOT NULL DEFAULT '{}'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_cases TEXT[] NOT NULL DEFAULT '{}'",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS client_id TEXT",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS property_id TEXT",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS case_id TEXT",
+    "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS client_id TEXT",
+    "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS property_id TEXT",
+    "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS case_id TEXT",
+    "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged_by BIGINT REFERENCES users(id)",
+    "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ",
+]
+
+# Index for client-scored retrieval (Phase 3a).
+ALTER_INDEX_STATEMENTS: list[str] = [
+    "CREATE INDEX IF NOT EXISTS idx_chunks_client ON document_chunks (client_id, department, is_active, is_approved)",
+    "CREATE INDEX IF NOT EXISTS idx_documents_client ON documents (client_id, department, is_active, is_approved)",
 ]
 
 
@@ -115,7 +163,11 @@ def init_schema(conn: psycopg.Connection) -> None:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         for ddl in DDL_STATEMENTS:
             cur.execute(ddl)
+        for stmt in ALTER_STATEMENTS:
+            cur.execute(stmt)
         for idx in INDEX_STATEMENTS:
+            cur.execute(idx)
+        for idx in ALTER_INDEX_STATEMENTS:
             cur.execute(idx)
     conn.commit()
 
