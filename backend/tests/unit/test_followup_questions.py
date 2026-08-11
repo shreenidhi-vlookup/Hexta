@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.response.followup_questions import suggest_followups
+from app.response.followup_questions import _is_answerable, suggest_followups
 
 
 class FakeCursor:
@@ -13,7 +13,12 @@ class FakeCursor:
         pass
 
     def fetchone(self):
-        return (self.result,)
+        # Every pooled connection from db/postgres/session.py::acquire() has
+        # row_factory=dict_row, so real fetchone() calls return a mapping
+        # (e.g. {"is_answerable": True}), never a plain tuple. This mock
+        # mirrors that so a regression like `cur.fetchone()[0]` (a KeyError
+        # against a dict_row) shows up here instead of only in production.
+        return {"is_answerable": self.result}
 
     def __enter__(self):
         return self
@@ -68,3 +73,17 @@ class TestTopicFollowups:
     def test_empty_sub_queries(self):
         fq = suggest_followups(FakeConn(), [])
         assert fq
+
+
+class TestIsAnswerable:
+    """Regression coverage: fetchone() on a dict_row cursor (what every
+    pooled connection actually uses in production, per
+    db/postgres/session.py::acquire()) must be read by key, not by [0]
+    index — that raised KeyError on every call and silently fell back to
+    'always answerable' via the except clause, making the check a no-op."""
+
+    def test_reads_dict_row_true(self):
+        assert _is_answerable(FakeConn(answerable=True), "lifetime mortgage") is True
+
+    def test_reads_dict_row_false(self):
+        assert _is_answerable(FakeConn(answerable=False), "lifetime mortgage") is False
