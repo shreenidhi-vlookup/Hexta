@@ -18,9 +18,9 @@ import time
 from collections import defaultdict
 
 # --- Tunables ---
-MAX_REQUESTS = 30          # login requests allowed per IP per request window
+MAX_REQUESTS = 120         # login requests allowed per IP per request window
 REQUEST_WINDOW_SEC = 60    # request budget window
-MAX_FAILURES = 5           # failed logins before lockout
+MAX_FAILURES = 20          # failed logins before lockout
 FAILURE_WINDOW_SEC = 900   # window over which failures are counted (15 min)
 LOCKOUT_SEC = 900          # lockout duration after threshold (15 min)
 
