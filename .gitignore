@@ -59,3 +59,7 @@ SESSION_SUMMARY.md
 
 # Local development data
 backend/storage/
+
+# Claude Code plugins (installed locally via /plugin install; not project code)
+.claude/plugins/*
+!.claude/plugins/.gitkeep
