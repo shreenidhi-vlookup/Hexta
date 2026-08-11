@@ -137,6 +137,9 @@ def process_file(file_path: Path) -> bool:
             source_path=metadata.source_path,
             chunks=chunks,
             embeddings=embeddings,
+            client_id=metadata.client_id,
+            property_id=metadata.property_id,
+            case_id=metadata.case_id,
         )
         logger.info(
             "Indexed %d, skipped %d for document %d",

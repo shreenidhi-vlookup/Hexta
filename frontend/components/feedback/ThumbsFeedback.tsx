@@ -1,41 +1,39 @@
 "use client";
 
 import { useState } from "react";
-import { ThumbsUp, ThumbsDown, Send, Loader2 } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Send, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { submitFeedback } from "@/lib/api-client";
 import { getToken } from "@/lib/auth";
 
 interface ThumbsFeedbackProps {
   responseId: string;
+  /** Icon-only thumbs placed inline next to the copy action */
+  compact?: boolean;
 }
 
-export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
+export default function ThumbsFeedback({
+  responseId,
+  compact = false,
+}: ThumbsFeedbackProps) {
   const [rating, setRating] = useState<number | null>(null);
   const [comment, setComment] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleRate = (value: number) => {
-    setRating(value);
-    setError(null);
-  };
-
-  const handleSubmit = async () => {
-    if (rating === null) return;
-
+  const submitRating = async (value: 1 | -1, note?: string) => {
     setIsSubmitting(true);
     setError(null);
-
     try {
       await submitFeedback(
         {
           response_id: responseId,
-          rating: rating === 1 ? 1 : -1,
-          comment: comment.trim() || undefined,
+          rating: value,
+          comment: note?.trim() || undefined,
         },
         getToken() ?? undefined
       );
@@ -46,6 +44,60 @@ export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
       setIsSubmitting(false);
     }
   };
+
+  const handleRate = (value: number) => {
+    setRating(value);
+    setError(null);
+  };
+
+  const handleSubmit = async () => {
+    if (rating === null) return;
+    await submitRating(rating === 1 ? 1 : -1, comment);
+  };
+
+  if (compact) {
+    if (submitted) {
+      return (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 text-muted-foreground"
+          aria-label="Feedback submitted"
+        >
+          <Check className="h-3.5 w-3.5 text-success" />
+        </Button>
+      );
+    }
+    return (
+      <div className="flex items-center gap-0.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+          aria-pressed={rating === 1}
+          aria-label="Rate as helpful"
+          disabled={isSubmitting}
+          onClick={() => submitRating(1)}
+        >
+          <ThumbsUp className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+          aria-pressed={rating === -1}
+          aria-label="Rate as not helpful"
+          disabled={isSubmitting}
+          onClick={() => submitRating(-1)}
+        >
+          <ThumbsDown className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
@@ -65,10 +117,11 @@ export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
           type="button"
           variant="outline"
           onClick={() => handleRate(1)}
+          aria-pressed={rating === 1}
           className={cn(
             "flex items-center gap-1 text-sm rounded-lg",
             rating === 1 &&
-              "bg-green-100 text-green-800 border-green-300 hover:bg-green-100"
+              "bg-success/10 text-success border-success/40 hover:bg-success/10"
           )}
         >
           <ThumbsUp className="w-3.5 h-3.5" />
@@ -78,10 +131,11 @@ export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
           type="button"
           variant="outline"
           onClick={() => handleRate(-1)}
+          aria-pressed={rating === -1}
           className={cn(
             "flex items-center gap-1 text-sm rounded-lg",
             rating === -1 &&
-              "bg-red-100 text-red-800 border-red-300 hover:bg-red-100"
+              "bg-destructive/10 text-destructive border-destructive/40 hover:bg-destructive/10"
           )}
         >
           <ThumbsDown className="w-3.5 h-3.5" />
@@ -93,12 +147,12 @@ export default function ThumbsFeedback({ responseId }: ThumbsFeedbackProps) {
 
       {rating !== null && (
         <div className="space-y-2">
-          <label
+          <Label
             htmlFor={`feedback-comment-${responseId}`}
-            className="block text-sm text-muted-foreground"
+            className="text-sm text-muted-foreground"
           >
             Optional feedback
-          </label>
+          </Label>
           <Textarea
             id={`feedback-comment-${responseId}`}
             value={comment}

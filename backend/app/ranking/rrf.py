@@ -30,6 +30,7 @@ class RankedCandidate:
     combined_rank: int
     is_approved: bool
     document_version: int
+    client_id: str | None = None
 
 
 RRF_K: int = 60  # standard RRF constant
@@ -86,6 +87,7 @@ def rank_fusion(
             combined_rank=0,
             is_approved=meta.get("is_approved", True),
             document_version=meta.get("document_version", 1),
+            client_id=meta.get("client_id"),
         ))
 
     results.sort(key=lambda c: c.rrf_score, reverse=True)

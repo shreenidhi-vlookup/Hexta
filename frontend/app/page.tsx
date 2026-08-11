@@ -3,12 +3,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertCircle, LogOut, Sparkles, Copy, Volume2, RefreshCw, Settings2 } from "lucide-react";
+import {
+  AlertCircle,
+  LogOut,
+  Sparkles,
+  Copy,
+  Volume2,
+  RefreshCw,
+  MoreVertical,
+} from "lucide-react";
 import { ResponsePackageCard, MultiAnswerCard, RelatedQuestions } from "@/components/search";
 import SettingsDialog from "@/components/settings/SettingsDialog";
+import ThemeToggle from "@/components/ui/theme-toggle";
 import { searchKnowledgeBase, SearchResponse, getUserSettings } from "@/lib/api-client";
-import { clearToken, getToken } from "@/lib/auth";
+import { clearToken, getToken, getTokenRole, isAdminRole } from "@/lib/auth";
 import ThumbsFeedback from "@/components/feedback/ThumbsFeedback";
+import {
+  listRecentChats,
+  saveChat,
+  deleteChat,
+  newChatId,
+  deriveTitle,
+  type RecentChat,
+  type ChatTurn,
+} from "@/lib/conversations";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +40,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import SearchBar from "@/components/search/SearchBar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { detectCannedReply } from "@/lib/greetings";
 import {
   Conversation,
@@ -37,6 +61,11 @@ import {
 import { Orb } from "@/components/ui/orb";
 import { Response } from "@/components/ui/response";
 import { Matrix, loader } from "@/components/ui/matrix";
+import { HomeSidebar } from "@/components/nav/HomeSidebar";
+import type { AdminSection } from "@/components/nav/HomeSidebar";
+import { AdminSections } from "@/components/admin/AdminPanel";
+
+export type NavView = "chat" | AdminSection | "settings" | "help";
 
 interface ChatMessage {
   id: string;
@@ -61,16 +90,58 @@ function answerPhrases(response?: SearchResponse): string[] {
   return response.answer_phrase ? [response.answer_phrase] : [];
 }
 
+const SIDEBAR_STORAGE_KEY = "hexa-sidebar-collapsed";
+
 export default function HomePage() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
+  const [chatToDelete, setChatToDelete] = useState<RecentChat | null>(null);
   const [showRelatedQuestions, setShowRelatedQuestions] = useState(true);
+  const [activeNav, setActiveNav] = useState<NavView>("chat");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+    }
+    return false;
+  });
+  const [recentChats, setRecentChats] = useState<RecentChat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [latestResponseId, setLatestResponseId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const messageIdRef = useRef(0);
   const submittingRef = useRef(false);
+  const turnsRef = useRef<ChatTurn[]>([]);
+
+  const isCurrentResponse = (m: ChatMessage) =>
+    m.from === "assistant" && m.id === latestResponseId;
+
+  const persistChat = useCallback(() => {
+    if (!currentChatId) return;
+    const turns = turnsRef.current;
+    if (turns.length === 0) return;
+    saveChat({
+      id: currentChatId,
+      title: deriveTitle(turns),
+      createdAt: Date.now(),
+      turns,
+    });
+    setRecentChats(listRecentChats());
+  }, [currentChatId]);
+
+  const appendTurn = useCallback(
+    (turn: ChatTurn) => {
+      turnsRef.current.push(turn);
+      persistChat();
+    },
+    [persistChat],
+  );
 
   const buildHistory = useCallback((msgs: ChatMessage[]) => {
     const turns: { question: string; answer?: string }[] = [];
@@ -98,13 +169,98 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    setIsAuthed(Boolean(getToken()));
-    loadSettings();
+    if (!sidebarCollapsed) {
+      setRecentChats(listRecentChats());
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const token = getToken();
+    setIsAuthed(Boolean(token));
+    setIsAdmin(isAdminRole(getTokenRole(token ?? "")));
+    setSidebarCollapsed(localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true");
+    if (token) {
+      loadSettings();
+      setRecentChats(listRecentChats());
+    }
   }, [loadSettings]);
+
+  useEffect(() => {
+    if (!currentChatId && activeNav === "chat") {
+      setCurrentChatId(newChatId());
+    }
+  }, [activeNav, currentChatId]);
+
+  const handleNewChat = useCallback(() => {
+    turnsRef.current = [];
+    setCurrentChatId(newChatId());
+    setMessages([]);
+    setError(null);
+    setLatestResponseId(null);
+    setActiveNav("chat");
+  }, []);
+
+  const handleHome = useCallback(() => {
+    setActiveNav("chat");
+  }, []);
+
+  const handleSelectRecent = useCallback((chat: RecentChat) => {
+    turnsRef.current = [...chat.turns];
+    setCurrentChatId(chat.id);
+    const idRef = { current: 0 };
+    const msgs: ChatMessage[] = chat.turns.map((t) => {
+      const id = `r${++idRef.current}`;
+      if (t.role === "user") {
+        return { id, from: "user", query: t.content, timestamp: "" };
+      }
+      return { id, from: "assistant", text: t.content, timestamp: "" };
+    });
+    setMessages(msgs);
+    setActiveNav("chat");
+    setLatestResponseId(msgs.findLast((m) => m.from === "assistant")?.id ?? null);
+  }, []);
+
+  const handleRequestDeleteRecent = useCallback((chat: RecentChat) => {
+    setChatToDelete(chat);
+  }, []);
+
+  const handleCancelDeleteRecent = useCallback(() => {
+    setChatToDelete(null);
+  }, []);
+
+  const handleConfirmDeleteRecent = useCallback(() => {
+    if (!chatToDelete) return;
+    const id = chatToDelete.id;
+    deleteChat(id);
+    setRecentChats(listRecentChats());
+    if (currentChatId === id) {
+      turnsRef.current = [];
+      setCurrentChatId(null);
+      setMessages([]);
+      setLatestResponseId(null);
+      setError(null);
+      setActiveNav("chat");
+    }
+    setChatToDelete(null);
+  }, [chatToDelete, currentChatId]);
+
+  const handleSidebarSelect = useCallback((view: NavView) => {
+    if (view === "settings") {
+      setSettingsOpen(true);
+      setActiveNav("chat");
+    } else if (view === "help") {
+      setActiveNav("help");
+    } else if (view === "chat") {
+      setActiveNav("chat");
+    } else {
+      setActiveNav(view);
+    }
+  }, []);
 
   const handleLogout = useCallback(() => {
     clearToken();
     setIsAuthed(false);
+    setIsAdmin(false);
     setMessages([]);
     setError(null);
     setShowSignOutDialog(false);
@@ -118,6 +274,10 @@ export default function HomePage() {
     const trimmed = q.trim();
     if (!trimmed || isLoading || submittingRef.current) return;
     submittingRef.current = true;
+
+    const ensureChat = () => {
+      if (!currentChatId) setCurrentChatId(newChatId());
+    };
 
     if (replaceMsgId) {
       setMessages((prev) =>
@@ -136,22 +296,25 @@ export default function HomePage() {
         )
       );
     } else {
+      ensureChat();
       const nextId = ++messageIdRef.current;
       setMessages((prev) => [
         ...prev,
         { id: `m${nextId}`, from: "user", query: trimmed, timestamp: now() },
       ]);
+      appendTurn({ role: "user", content: trimmed });
     }
 
     const canned = detectCannedReply(trimmed);
     if (canned) {
+      const msgId = replaceMsgId ?? `m${++messageIdRef.current}`;
       if (replaceMsgId) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === replaceMsgId
               ? {
                   ...m,
-                  from: "assistant",
+                  from: "assistant" as const,
                   text: canned.text,
                   followUps: canned.followUps,
                   isStreaming: false,
@@ -165,14 +328,18 @@ export default function HomePage() {
         setMessages((prev) => [
           ...prev,
           {
-            id: `m${++messageIdRef.current}`,
-            from: "assistant",
+            id: msgId,
+            from: "assistant" as const,
             text: canned.text,
             followUps: canned.followUps,
+            isStreaming: false,
+            streamedTitle: "",
             timestamp: now(),
           },
         ]);
       }
+      setLatestResponseId(msgId);
+      appendTurn({ role: "assistant", content: canned.text });
       submittingRef.current = false;
       return;
     }
@@ -206,6 +373,11 @@ export default function HomePage() {
         streamedTitle: "",
         isStreaming: true,
       });
+      setLatestResponseId(msgId);
+      appendTurn({
+        role: "assistant",
+        content: result.answer_phrase || result.title,
+      });
       let currentTitle = "";
       const titleChars = result.title.split("");
       const streamInterval = setInterval(() => {
@@ -233,42 +405,19 @@ export default function HomePage() {
     handleSearch(question);
   };
 
-  return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="mx-auto max-w-4xl px-4 h-16 flex items-center justify-between lg:max-w-6xl xl:max-w-7xl">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary text-primary-foreground shadow-sm">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div className="leading-tight">
-              <h1 className="text-2xl font-bold text-foreground">Hexta</h1>
-              <p className="text-xs text-muted-foreground">
-                Knowledge Assistant
-              </p>
-            </div>
-          </div>
-          {isAuthed ? (
-            <div className="flex items-center gap-2">
-              <SettingsDialog />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSignOutDialog(true)}
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign out
-              </Button>
-            </div>
-          ) : (
-            <Button asChild size="sm">
-              <Link href="/login">Sign in</Link>
-            </Button>
-          )}
-        </div>
-      </header>
+  const handleToggleCollapse = useCallback(() => {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
+    if (next) {
+      setRecentChats([]);
+    } else {
+      setRecentChats(listRecentChats());
+    }
+  }, [sidebarCollapsed]);
 
+  const renderChatContent = () => (
+    <>
       <Conversation className="flex-1">
         <ConversationContent className="mx-auto w-full max-w-4xl px-4 lg:max-w-6xl xl:max-w-7xl">
           {messages.length === 0 ? (
@@ -287,10 +436,10 @@ export default function HomePage() {
                 <Message key={message.id} from={message.from}>
                   {message.from === "user" ? (
                     <>
-                      <MessageContent>{message.query}</MessageContent>
                       <MessageAvatar src="" name="You" />
+                      <MessageContent>{message.query}</MessageContent>
                       <span className="text-[10px] text-muted-foreground/50">
-                        {message.timestamp}
+                        {message.timestamp || now()}
                       </span>
                     </>
                   ) : (
@@ -302,133 +451,173 @@ export default function HomePage() {
                       ) : (
                         <MessageAvatar src="" name="Hexta" />
                       )}
-                      <MessageContent
-                        variant="flat"
-                        className="max-w-full w-full"
-                      >
-                        {message.text ? (
-                          <>
-                            <div className="text-sm">{message.text}</div>
-                            {message.followUps &&
-                              message.followUps.length > 0 && (
-                                <div className="flex flex-wrap gap-2 pt-1">
-                                  {message.followUps.map((f) => (
-                                    <Button
-                                      key={f}
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-auto text-xs"
-                                      onClick={() => handleAskRelated(f)}
-                                    >
-                                      {f}
-                                    </Button>
-                                  ))}
-                                </div>
-                              )}
-                          </>
-                        ) : message.isStreaming && message.streamedTitle ? (
-                          <Response>{message.streamedTitle}</Response>
-                        )                         : message.response ? (
-                          <>
-                            {message.response.answers &&
-                            message.response.answers.length > 1 ? (
-                              <MultiAnswerCard
-                                blocks={message.response.answers}
-                                comparison={message.response.comparison}
-                                timestamp={message.timestamp}
-                              />
+                      <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+                        <MessageContent variant="contained">
+                          {message.text ? (
+                            <>
+                              <div className="text-sm">{message.text}</div>
+                              {message.followUps &&
+                                message.followUps.length > 0 &&
+                                isCurrentResponse(message) && (
+                                  <div className="flex flex-wrap gap-2 pt-1">
+                                    {message.followUps.map((f) => (
+                                      <Button
+                                        key={f}
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-auto text-xs"
+                                        onClick={() => handleAskRelated(f)}
+                                      >
+                                        {f}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                )}
+                            </>
+                          ) : message.isStreaming ? (
+                            message.streamedTitle ? (
+                              <Response>{message.streamedTitle}</Response>
                             ) : (
-                              <ResponsePackageCard
-                                title={message.response.title}
-                                answerPhrase={message.response.answer_phrase}
-                                excerpts={message.response.excerpts}
-                                confidence={message.response.confidence}
-                                routing={message.response.routing}
-                                embedded
-                                timestamp={message.timestamp}
-                              />
-                            )}
-                            {message.response.routing !== "no_answer" && (
-                              <div className="flex items-center gap-1 mt-1">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                                  onClick={() => {
-                                    const phrases = answerPhrases(
-                                      message.response,
-                                    );
-                                    if (phrases.length > 0) {
-                                      const utterance = new SpeechSynthesisUtterance(
-                                        phrases.join(". "),
-                                      );
-                                      window.speechSynthesis.speak(utterance);
-                                    }
-                                  }}
-                                  aria-label="Speak answer"
-                                >
-                                  <Volume2 className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                                  onClick={() => {
-                                    const phrases = answerPhrases(
-                                      message.response,
-                                    );
-                                    if (phrases.length > 0) {
-                                      navigator.clipboard.writeText(
-                                        phrases.join(". "),
-                                      );
-                                    }
-                                  }}
-                                  aria-label="Copy answer"
-                                >
-                                  <Copy className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                                  onClick={() => {
-                                    if (message.query) {
-                                      handleSearch(message.query, message.id);
-                                    }
-                                  }}
-                                  aria-label="Regenerate answer"
-                                >
-                                  <RefreshCw className="h-3.5 w-3.5" />
-                                </Button>
+                              <div className="text-sm text-muted-foreground">
+                                Searching…
                               </div>
-                            )}
-                            {message.response.routing !== "no_answer" && (
+                            )
+                          ) : message.response ? (
+                            <>
+                              {message.response.answers &&
+                              message.response.answers.length > 1 ? (
+                                <MultiAnswerCard
+                                  blocks={message.response.answers}
+                                  comparison={message.response.comparison}
+                                  timestamp={message.timestamp}
+                                  sourcesOpen={sourcesOpen}
+                                  onToggleSources={() =>
+                                    setSourcesOpen((open) => !open)
+                                  }
+                                />
+                              ) : (
+                                <ResponsePackageCard
+                                  title={message.response.title}
+                                  answerPhrase={message.response.answer_phrase}
+                                  excerpts={message.response.excerpts}
+                                  confidence={message.response.confidence}
+                                  routing={message.response.routing}
+                                  embedded
+                                  timestamp={message.timestamp}
+                                  sourcesOpen={sourcesOpen}
+                                  onToggleSources={() =>
+                                    setSourcesOpen((open) => !open)
+                                  }
+                                />
+                              )}
+                            </>
+                          ) : (
+                            <div className="text-muted-foreground text-sm">
+                              {message.error ?? "Something went wrong"}
+                            </div>
+                          )}
+                        </MessageContent>
+                        {message.response &&
+                          isCurrentResponse(message) &&
+                          message.response.routing !== "no_answer" && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  const phrases = answerPhrases(message.response);
+                                  if (phrases.length > 0) {
+                                    const utterance =
+                                      new SpeechSynthesisUtterance(
+                                        phrases.join(". "),
+                                      );
+                                    window.speechSynthesis.speak(utterance);
+                                  }
+                                }}
+                                aria-label="Speak answer"
+                              >
+                                <Volume2 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  const phrases = answerPhrases(message.response);
+                                  if (phrases.length > 0) {
+                                    navigator.clipboard.writeText(
+                                      phrases.join(". "),
+                                    );
+                                  }
+                                }}
+                                aria-label="Copy answer"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                              </Button>
                               <ThumbsFeedback
                                 responseId={message.response.response_id}
+                                compact
                               />
-                            )}
-                            {showRelatedQuestions &&
-                              message.response.routing !== "no_answer" && (
-                              <RelatedQuestions
-                                questions={message.response.related_questions}
-                                onAskQuestion={handleAskRelated}
-                              />
-                            )}
-                          </>
-                        ) : message.isStreaming ? (
-                          <div className="text-sm text-muted-foreground">
-                            Searching…
-                          </div>
-                        ) : (
-                          <div className="text-muted-foreground text-sm">
-                            {message.error ?? "Something went wrong"}
-                          </div>
-                        )}
-                      </MessageContent>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  if (message.query) {
+                                    handleSearch(message.query, message.id);
+                                  }
+                                }}
+                                aria-label="Regenerate answer"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                              </Button>
+                              <DropdownMenu
+                                open={sourceMenuOpen}
+                                onOpenChange={setSourceMenuOpen}
+                              >
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                                    aria-label="Source options"
+                                  >
+                                    <MoreVertical className="h-3.5 w-3.5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" side="bottom">
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSourcesOpen((open) => !open);
+                                      setSourceMenuOpen(false);
+                                    }}
+                                  >
+                                    {sourcesOpen
+                                      ? "Hide sources"
+                                      : "View sources"}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          )}
+                        {showRelatedQuestions &&
+                          isCurrentResponse(message) &&
+                          message.response?.routing !== "no_answer" && (
+                            <RelatedQuestions
+                              questions={message.response?.related_questions ?? []}
+                              onAskQuestion={handleAskRelated}
+                            />
+                          )}
+                        <span className="text-[10px] text-muted-foreground/50">
+                          {message.timestamp || now()}
+                        </span>
+                      </div>
                     </>
                   )}
                 </Message>
@@ -473,13 +662,130 @@ export default function HomePage() {
       <footer className="border-t border-border bg-card/50 backdrop-blur-sm sticky bottom-0 z-10">
         <div className="mx-auto max-w-4xl px-4 py-4 lg:max-w-6xl xl:max-w-7xl">
           <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+
           {messages.length === 0 && (
-            <div className="mt-3 text-center text-xs text-muted-foreground">
+            <div className="mt-4 text-center text-xs text-muted-foreground">
               Responses are sourced verbatim from internal documents.
             </div>
           )}
         </div>
       </footer>
+    </>
+  );
+
+  return (
+    <div className="flex h-screen bg-background text-foreground">
+      {isAuthed && (
+        <HomeSidebar
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={handleToggleCollapse}
+          isAdmin={isAdmin}
+          active={activeNav}
+          onSelect={handleSidebarSelect}
+          onNewChat={handleNewChat}
+          onHome={handleHome}
+          recent={recentChats}
+          onSelectRecent={handleSelectRecent}
+          onDeleteRecent={handleRequestDeleteRecent}
+        />
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+          <div className="mx-auto max-w-4xl flex h-16 items-center justify-between px-4 lg:max-w-6xl xl:max-w-7xl">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary text-primary-foreground shadow-sm">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div className="leading-tight">
+                <h1 className="text-2xl font-bold text-foreground">Hexta</h1>
+                <p className="text-xs text-muted-foreground">
+                  Knowledge Assistant
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              {isAuthed ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowSignOutDialog(true)}
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign out
+                </Button>
+              ) : (
+                <Button asChild size="sm">
+                  <Link href="/login">Sign in</Link>
+                </Button>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {activeNav === "chat" ? (
+          renderChatContent()
+        ) : activeNav === "help" ? (
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="mx-auto max-w-3xl space-y-4">
+              <h2 className="text-xl font-bold">Help</h2>
+              <p className="text-sm text-muted-foreground">
+                Hexta is a retrieval-based knowledge assistant. Ask questions
+                about credit scores, LTV ratios, required documents, eligibility
+                criteria, mortgage terms, and property management processes.
+              </p>
+              <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                <li>Answers are sourced verbatim from internal documents.</li>
+                <li>
+                  Responses include a confidence score and a routing label
+                  (answer/partial/no_answer).
+                </li>
+                <li>
+                  Click &quot;View sources&quot; to see where an answer came from.
+                </li>
+                <li>
+                  Use the sidebar to switch to administration tools (admin
+                  roles only).
+                </li>
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <AdminSections active={activeNav as AdminSection} />
+        )}
+      </div>
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onShowRelatedQuestionsChange={setShowRelatedQuestions}
+      />
+
+      <AlertDialog
+        open={chatToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setChatToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete recent chat?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this session? This action will
+              remove the chat from your recent chats.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelDeleteRecent}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDeleteRecent}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={showSignOutDialog} onOpenChange={setShowSignOutDialog}>
         <AlertDialogContent>

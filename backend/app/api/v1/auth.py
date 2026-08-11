@@ -45,7 +45,8 @@ async def login(request: LoginRequest) -> LoginResponse:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, email, password_hash, role, department, "
-                "allowed_departments FROM users "
+                "allowed_departments, client_id, assigned_clients, assigned_cases "
+                "FROM users "
                 "WHERE email = %s AND is_active = true",
                 (request.email,),
             )
@@ -62,6 +63,9 @@ async def login(request: LoginRequest) -> LoginResponse:
         role=row["role"],
         department=row["department"],
         allowed_departments=list(row["allowed_departments"] or []),
+        client_id=row["client_id"],
+        assigned_clients=list(row["assigned_clients"] or []),
+        assigned_cases=list(row["assigned_cases"] or []),
     )
 
     return LoginResponse(

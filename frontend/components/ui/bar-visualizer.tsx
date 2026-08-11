@@ -9,6 +9,7 @@ import {
   useState,
   type HTMLAttributes,
 } from "react"
+import { useReducedMotion } from "framer-motion"
 
 import { cn } from "@/lib/utils"
 
@@ -371,6 +372,8 @@ const BarVisualizerComponent = forwardRef<HTMLDivElement, BarVisualizerProps>(
     },
     ref
   ) => {
+    const reduceMotion = useReducedMotion()
+
     // Audio processing
     const realVolumeBands = useMultibandVolume(mediaStream, {
       bands: barCount,
@@ -391,6 +394,13 @@ const BarVisualizerComponent = forwardRef<HTMLDivElement, BarVisualizerProps>(
 
       if (state !== "speaking" && state !== "listening") {
         const bands = new Array(barCount).fill(0.2)
+        fakeVolumeBandsRef.current = bands
+        setFakeVolumeBands(bands)
+        return
+      }
+
+      if (reduceMotion) {
+        const bands = new Array(barCount).fill(0.35)
         fakeVolumeBandsRef.current = bands
         setFakeVolumeBands(bands)
         return
@@ -439,7 +449,7 @@ const BarVisualizerComponent = forwardRef<HTMLDivElement, BarVisualizerProps>(
           cancelAnimationFrame(fakeAnimationRef.current)
         }
       }
-    }, [demo, state, barCount])
+    }, [demo, state, barCount, reduceMotion])
 
     // Use fake or real volume data based on demo mode
     const volumeBands = useMemo(

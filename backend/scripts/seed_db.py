@@ -10,6 +10,7 @@ from passlib.hash import bcrypt
 from app.db.postgres.session import acquire
 
 ADMIN_PASSWORD_HASH = "$2b$12$B5z08U8N66Hn2E/s6RIuZuti.MxB5wpWjWNySk2h6qXooQSAUOnHK"
+STAFF_PASSWORD_HASH = "$2b$12$.jBHztpNLpWda9BEsVsHbuqewwQrUNZSTN8uKfVMCMuFWYVe34RZq"  # Staff@123
 
 
 def seed() -> None:
@@ -38,6 +39,28 @@ def seed() -> None:
                 print("Admin user created.")
 
             cur.execute(
+                "SELECT id FROM users WHERE email = %s",
+                ("staff@hexa.local",),
+            )
+            if cur.fetchone():
+                print("Staff user already exists, skipping.")
+            else:
+                cur.execute(
+                    "INSERT INTO users (email, password_hash, full_name, role, department, allowed_departments) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (
+                        "staff@hexa.local",
+                        STAFF_PASSWORD_HASH,
+                        "Staff User",
+                        "loan_officer",
+                        "general",
+                        ["general"],
+                    ),
+                )
+                print("Staff user created.")
+
+
+            cur.execute(
                 "SELECT id FROM documents WHERE title = %s",
                 ("Sample Policy Document",),
             )
@@ -46,15 +69,15 @@ def seed() -> None:
                 return
 
             cur.execute(
-                "INSERT INTO documents (title, source_path, doc_type, department) "
-                "VALUES (%s, %s, %s, %s) RETURNING id",
+                "INSERT INTO documents (title, source_path, doc_type, department, is_approved) "
+                "VALUES (%s, %s, %s, %s, true) RETURNING id",
                 ("Sample Policy Document", "/docs/sample_policy.pdf", "policy", "general"),
             )
             doc_id = cur.fetchone()["id"]
 
             cur.execute(
-                "INSERT INTO documents (title, source_path, doc_type, department) "
-                "VALUES (%s, %s, %s, %s) RETURNING id",
+                "INSERT INTO documents (title, source_path, doc_type, department, is_approved) "
+                "VALUES (%s, %s, %s, %s, true) RETURNING id",
                 ("Eligibility Guidelines", "/docs/eligibility.pdf", "policy", "general"),
             )
             doc2_id = cur.fetchone()["id"]
@@ -70,8 +93,8 @@ def seed() -> None:
 
             for doc_id, content, section, chunk_type in chunks:
                 cur.execute(
-                    "INSERT INTO document_chunks (document_id, content, content_hash, section, chunk_type, department) "
-                    "VALUES (%s, %s, md5(%s), %s, %s, %s)",
+                    "INSERT INTO document_chunks (document_id, content, content_hash, section, chunk_type, department, is_approved) "
+                    "VALUES (%s, %s, md5(%s), %s, %s, %s, true)",
                     (doc_id, content, content, section, chunk_type, "general"),
                 )
 

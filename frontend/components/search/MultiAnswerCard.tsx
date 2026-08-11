@@ -9,6 +9,9 @@ interface MultiAnswerCardProps {
   comparison?: boolean;
   /** Timestamp to display on each answered block */
   timestamp?: string;
+  /** Controlled sources panel state (forwarded to each block) */
+  sourcesOpen?: boolean;
+  onToggleSources?: () => void;
 }
 
 /**
@@ -21,6 +24,8 @@ export default function MultiAnswerCard({
   blocks,
   comparison = false,
   timestamp,
+  sourcesOpen,
+  onToggleSources,
 }: MultiAnswerCardProps) {
   if (!blocks || blocks.length === 0) {
     return null;
@@ -40,10 +45,12 @@ export default function MultiAnswerCard({
 
       {blocks.map((block, index) => (
         <AnswerBlockItem
-          key={`${index}-${block.question}`}
+          key={index}
           index={index}
           block={block}
           timestamp={timestamp}
+          sourcesOpen={sourcesOpen}
+          onToggleSources={onToggleSources}
         />
       ))}
     </div>
@@ -54,10 +61,14 @@ function AnswerBlockItem({
   index,
   block,
   timestamp,
+  sourcesOpen,
+  onToggleSources,
 }: {
   index: number;
   block: AnswerBlock;
   timestamp?: string;
+  sourcesOpen?: boolean;
+  onToggleSources?: () => void;
 }) {
   const unanswered = block.routing === "no_answer" || block.excerpts.length === 0;
 
@@ -90,6 +101,8 @@ function AnswerBlockItem({
         routing={block.routing}
         embedded
         timestamp={timestamp}
+        sourcesOpen={sourcesOpen}
+        onToggleSources={onToggleSources}
       />
     </div>
   );

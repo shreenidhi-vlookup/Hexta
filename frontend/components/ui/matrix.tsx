@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useReducedMotion } from "framer-motion"
 
 import { cn } from "@/lib/utils"
 
@@ -442,9 +443,10 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
     },
     ref
   ) => {
+    const reduceMotion = useReducedMotion()
     const { frameIndex } = useAnimation(frames, {
       fps,
-      autoplay: autoplay && !pattern,
+      autoplay: autoplay && !pattern && !reduceMotion,
       loop,
       onFrame,
     })

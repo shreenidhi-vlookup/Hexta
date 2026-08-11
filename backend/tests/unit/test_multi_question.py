@@ -55,3 +55,24 @@ class TestMultiQuestionSplitting:
     def test_guard_keeps_list_continuation(self):
         qs = split_questions("what income is considered for later life lending")
         assert qs == ["what income is considered for later life lending"]
+
+    def test_terse_and_joined_intents_split(self):
+        qs = split_questions("max dti and required documents and first time buyer programs")
+        assert qs == ["max dti", "required documents", "first time buyer programs"]
+
+    def test_income_and_employment_requirements_stay_one(self):
+        """Joint requirement list must not be split — both sides are bare
+        attributes, not distinct self-contained requests."""
+        qs = split_questions("income and employment requirements")
+        assert qs == ["income and employment requirements"]
+
+    def test_terse_documents_and_dti(self):
+        qs = split_questions("max dti and required documents")
+        assert qs == ["max dti", "required documents"]
+
+    def test_mixed_sentence_and_terse(self):
+        qs = split_questions(
+            "what is the max debt to income ratio and what documents are required and eligibility"
+        )
+        assert "what documents are required" in qs or "required documents" in qs
+        assert len(qs) >= 2

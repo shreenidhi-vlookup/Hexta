@@ -200,6 +200,10 @@ COMMON_WORDS: set[str] = {
      "credit", "score", "fico", "loan", "money", "funds", "down", "payment",
      "investment", "property", "properties", "value", "home", "house",
      "lender", "borrower", "applicant", "mortgage", "refinance",
+     "finance", "financial", "financing", "borrow", "borrowing", "borrowed",
+     "deposit", "deposits", "debt", "debts", "repay", "repayment",
+     "repayments", "repaid", "remortgage", "protection", "insurance",
+     "affordability", "collateral", "creditworthiness",
 }
 
 # Phrases that indicate a new question when they start a fragment.
@@ -297,6 +301,17 @@ SCENARIO_CONCEPTS: list[tuple[re.Pattern, str]] = [
             r"change\s+(?:my\s+)?mortgage\s+product\b|new\s+product\s+with\s+same\s+lender\b)"
         ),
         "product transfer",
+    ),
+    (
+        re.compile(
+            r"\b(?:when|if|after|once|until|should|before)\s+"
+            r"(?:(?:the|my|your|their|our)\s+)?"
+            r"(?:borrower|homeowner|owner|someone|somebody|they|them|i|you|we|he|she|both|either)\s+"
+            r"(?:die[sd]?|died|pass(?:es|ed)?\s+away|pass(?:es|ed)?\s+on|decease[sd]?)\b"
+            r"|\b(?:repay|repaid|repayment|repayments)\s+on\s+death|in\s+the\s+event\s+of\s+death|"
+            r"sold\s+to\s+repay|sale\s+of\s+the\s+(?:home|house|property)\s+to\s+repay\b"
+        ),
+        "lifetime mortgage equity release loan repaid from the sale of the property",
     ),
 ]
 

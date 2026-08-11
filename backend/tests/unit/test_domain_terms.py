@@ -35,3 +35,35 @@ class TestScenarioConcepts:
 
     def test_no_concept_match(self):
         assert scenario_concepts_for("what is the minimum credit score?") == []
+
+
+class TestDeathScenarioConcepts:
+    """Death / repayment-on-death questions should expand to the lifetime
+    mortgage repayment concept so retrieval finds the 'home is sold to
+    repay the loan' answer instead of unrelated chunks."""
+
+    def test_property_when_they_die(self):
+        concepts = scenario_concepts_for("what happens to the property when they die")
+        assert any("lifetime mortgage" in c for c in concepts)
+
+    def test_borrower_dies(self):
+        concepts = scenario_concepts_for("what happens when the borrower dies")
+        assert any("lifetime mortgage" in c for c in concepts)
+
+    def test_when_i_die(self):
+        concepts = scenario_concepts_for("what happens to my home when i die")
+        assert any("lifetime mortgage" in c for c in concepts)
+
+    def test_repaid_on_death(self):
+        concepts = scenario_concepts_for("how is the loan repaid on death")
+        assert any("lifetime mortgage" in c for c in concepts)
+
+    def test_sold_to_repay(self):
+        concepts = scenario_concepts_for("is the home sold to repay the mortgage on death")
+        assert any("lifetime mortgage" in c for c in concepts)
+
+    def test_no_death_no_match(self):
+        assert scenario_concepts_for("is a lifetime mortgage repaid") == []
+
+    def test_unrelated_die_usage_not_matched(self):
+        assert scenario_concepts_for("the insurance pays out on diagnosis") == []

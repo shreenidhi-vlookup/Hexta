@@ -26,6 +26,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className={`${inter.className} antialiased`}>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem("hexa-theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}`,
+          }}
+        />
         {children}
         <Toaster />
       </body>

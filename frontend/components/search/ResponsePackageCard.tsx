@@ -23,6 +23,9 @@ interface ResponsePackageCardProps {
   embedded?: boolean;
   /** Timestamp to display */
   timestamp?: string;
+  /** Controlled sources panel state (when used outside the card) */
+  sourcesOpen?: boolean;
+  onToggleSources?: () => void;
 }
 
 export default function ResponsePackageCard({
@@ -33,8 +36,21 @@ export default function ResponsePackageCard({
   routing,
   embedded = false,
   timestamp,
+  sourcesOpen: controlledSourcesOpen,
+  onToggleSources,
 }: ResponsePackageCardProps) {
-  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [internalSourcesOpen, setInternalSourcesOpen] = useState(false);
+
+  const sourcesOpen = controlledSourcesOpen ?? internalSourcesOpen;
+  const toggleSources = () => {
+    if (onToggleSources) {
+      onToggleSources();
+    } else {
+      setInternalSourcesOpen((open) => !open);
+    }
+    setMenuOpen(false);
+  };
 
   if (routing === "no_answer" || excerpts.length === 0) {
     return (
@@ -62,89 +78,13 @@ export default function ResponsePackageCard({
   if (embedded) {
     return (
       <div className="space-y-2 w-full">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 flex-1">
           <p className="text-sm text-foreground leading-relaxed flex-1">
             {answerPhrase || title}
           </p>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {timestamp && (
-              <span className="text-[10px] text-muted-foreground/60">
-                {timestamp}
-              </span>
-            )}
-            {excerpts.length > 0 && (
-              <DropdownMenu
-                open={sourcesOpen}
-                onOpenChange={setSourcesOpen}
-              >
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    aria-label="More options"
-                  >
-                    <MoreVertical className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" side="bottom">
-                  <DropdownMenuItem
-                    onClick={() => setSourcesOpen(!sourcesOpen)}
-                  >
-                    {sourcesOpen
-                      ? "Hide sources"
-                      : `View sources (${excerpts.length})`}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
         </div>
 
-        {sourcesOpen && (
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center gap-2">
-              <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Sources ({excerpts.length})
-              </h3>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            {excerpts.map((excerpt, i) => (
-              <Card key={i} className="shadow-sm">
-                <CardHeader className="pb-2 flex-row items-start gap-2 space-y-0">
-                  <div className="mt-0.5 flex-shrink-0 text-muted-foreground">
-                    {excerpt.source.chunk_type === "table" ? (
-                      <Hash className="h-3 w-3" />
-                    ) : (
-                      <FileText className="h-3 w-3" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className="text-xs font-semibold leading-snug">
-                      Source {i + 1}: {excerpt.source.title}
-                    </CardTitle>
-                    {excerpt.source.section && (
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {excerpt.source.section}
-                      </p>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="prose prose-xs max-w-none">
-                    {excerpt.text.split("\n").map((line, j) => (
-                      <p key={j} className="mb-1.5 leading-relaxed">
-                        {line}
-                      </p>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+        {sourcesOpen && <SourceProvenanceList excerpts={excerpts} />}
       </div>
     );
   }
@@ -161,22 +101,20 @@ export default function ResponsePackageCard({
           )}
           <ConfidenceBadge confidence={confidence} routing={routing} size="sm" />
           {excerpts.length > 0 && (
-            <DropdownMenu open={sourcesOpen} onOpenChange={setSourcesOpen}>
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-6 w-6 p-0"
-                  aria-label="More options"
+                  className="h-8 w-8 p-0"
+                  aria-label="Source options"
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="bottom">
-                <DropdownMenuItem
-                  onClick={() => setSourcesOpen(!sourcesOpen)}
-                >
+                <DropdownMenuItem onClick={toggleSources}>
                   {sourcesOpen ? "Hide sources" : `View sources (${excerpts.length})`}
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -185,49 +123,48 @@ export default function ResponsePackageCard({
         </div>
       </div>
 
-      {sourcesOpen && (
-        <div className="space-y-3 pt-2">
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Sources ({excerpts.length})
-            </h3>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          {excerpts.map((excerpt, i) => (
-            <Card key={i} className="shadow-sm">
-              <CardHeader className="pb-2 flex-row items-start gap-2 space-y-0">
-                <div className="mt-0.5 flex-shrink-0 text-muted-foreground">
-                  {excerpt.source.chunk_type === "table" ? (
-                    <Hash className="h-3 w-3" />
-                  ) : (
-                    <FileText className="h-3 w-3" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <CardTitle className="text-xs font-semibold leading-snug">
-                    Source {i + 1}: {excerpt.source.title}
-                  </CardTitle>
-                  {excerpt.source.section && (
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {excerpt.source.section}
-                    </p>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="prose prose-xs max-w-none">
-                  {excerpt.text.split("\n").map((line, j) => (
-                    <p key={j} className="mb-1.5 leading-relaxed">
-                      {line}
-                    </p>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      {sourcesOpen && <SourceProvenanceList excerpts={excerpts} />}
+    </div>
+  );
+}
+
+/**
+ * Provenance-only source list: shows where each answer came from
+ * (source title + section) without dumping the full excerpt text.
+ */
+function SourceProvenanceList({ excerpts }: { excerpts: SearchExcerpt[] }) {
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="flex items-center gap-2">
+        <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Sources ({excerpts.length})
+        </h3>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+      {excerpts.map((excerpt, i) => (
+        <Card key={i} className="shadow-sm">
+          <CardHeader className="pb-2 flex-row items-start gap-2 space-y-0">
+            <div className="mt-0.5 flex-shrink-0 text-muted-foreground">
+              {excerpt.source.chunk_type === "table" ? (
+                <Hash className="h-3 w-3" />
+              ) : (
+                <FileText className="h-3 w-3" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <CardTitle className="text-xs font-semibold leading-snug">
+                Source {i + 1}: {excerpt.source.title}
+              </CardTitle>
+              {excerpt.source.section && (
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {excerpt.source.section}
+                </p>
+              )}
+            </div>
+          </CardHeader>
+        </Card>
+      ))}
     </div>
   );
 }

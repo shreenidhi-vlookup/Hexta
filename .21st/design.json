@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "project": {
+    "name": "hexa-agent-main",
+    "productType": "RAG knowledge assistant (loan requirements)",
+    "stack": ["Next.js 14 (App Router)", "React 18", "TypeScript", "Tailwind CSS", "shadcn/ui", "Radix primitives"]
+  },
+  "sources": {
+    "tokens": ["frontend/styles/globals.css"],
+    "components": ["frontend/components.json"],
+    "assets": [],
+    "instructions": [
+      "AGENTS.md",
+      "CLAUDE.md"
+    ]
+  },
+  "design": {
+    "colorMode": "light-and-dark",
+    "colors": {
+      "primary": { "light": "hsl(0 0% 0%)", "dark": "hsl(0 0% 100%)" },
+      "primary-foreground": { "light": "hsl(0 0% 100%)", "dark": "hsl(0 0% 0%)" },
+      "secondary": { "light": "hsl(0 0% 96.1%)", "dark": "hsl(0 0% 12.5%)" },
+      "muted": { "light": "hsl(0 0% 96.1%)", "dark": "hsl(0 0% 12.5%)" },
+      "muted-foreground": { "light": "hsl(0 0% 45.1%)", "dark": "hsl(0 0% 63.9%)" },
+      "accent": { "light": "hsl(213.3 100% 96.9%)", "dark": "hsl(212.3 52% 24.5%)" },
+      "background": { "light": "hsl(0 0% 100%)", "dark": "hsl(0 0% 3.9%)" },
+      "card": { "light": "hsl(0 0% 100%)", "dark": "hsl(0 0% 7.8%)" },
+      "border": { "light": "hsl(0 0% 89.8%)", "dark": "hsl(0 0% 18.8%)" },
+      "ring": { "light": "hsl(0 0% 0%)", "dark": "hsl(0 0% 100%)" },
+      "success": { "light": "hsl(152 61% 38%)", "dark": "hsl(152 60% 42%)" },
+      "warning": { "light": "hsl(38 92% 50%)", "dark": "hsl(38 92% 50%)" }
+    },
+    "typography": {
+      "font": "var(--font-sans), system-ui, -apple-system, sans-serif",
+      "note": "Monochrome neutral design (0 0% hsl family), near-black primary on white"
+    },
+    "spacing": {},
+    "radius": { "DEFAULT": "0.5rem" },
+    "shadows": {},
+    "motion": {
+      "accordion": "accordion-down/up 0.2s ease-out"
+    },
+    "density": "compact"
+  },
+  "components": {
+    "installed": [
+      "button", "card", "avatar", "badge", "input", "label", "textarea",
+      "select", "tabs", "dialog", "alert-dialog", "dropdown-menu", "accordion",
+      "separator", "scroll-area", "skeleton", "toast", "tooltip", "checkbox",
+      "theme-toggle"
+    ],
+    "preferredPrimitives": ["Button", "Card", "Avatar", "DropdownMenu", "AlertDialog", "Accordion", "ConfidenceBadge", "ThumbsFeedback", "RelatedQuestions", "ResponsePackageCard"],
+    "patterns": [
+      "Chat bubble (user primary bg right, assistant secondary bg left)",
+      "3-dot source menu next to regenerate action",
+      "Sidebar recent chats + admin nav"
+    ]
+  },
+  "constraints": {
+    "must": [
+      "Use existing Tailwind CSS variables (primary, secondary, muted, border, ring)",
+      "Reuse existing shadcn/ui components over new lookalikes",
+      "Keep compact density and 0.5rem radius",
+      "Use real product copy and states"
+    ],
+    "avoid": [
+      "Decorative gradients and glass effects",
+      "Excessive cards and huge headlines",
+      "New arbitrary color values outside tokens"
+    ]
+  },
+  "decisions": [
+    {
+      "date": "2026-08-07",
+      "summary": "UI audit + alignment: assistant bubble now capped to max-w-[80%] to match user bubble; action icons unified to h-8 w-8 icon-only buttons.",
+      "notes": [
+        "Assistant MessageContent no longer overrides max-w-[80%] (removed max-w-full w-full), so both sides render as bounded bubbles.",
+        "Speak/Copy/Regenerate/More action buttons unified to h-8 w-8 p-0 (icon-only), matching ThumbsFeedback compact h-8 w-8.",
+        "Verified with 21st review: no issues in changed files; focus-outline-none errors are pre-existing in AdminPanel and build bundle only."
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "fact": "project.instructions",
+      "source": "AGENTS.md"
+    },
+    {
+      "fact": "project.instructions",
+      "source": "CLAUDE.md"
+    },
+    {
+      "fact": "tokens",
+      "source": "frontend/styles/globals.css"
+    },
+    {
+      "fact": "components",
+      "source": "frontend/components.json"
+    }
+  ],
+  "generatedAt": "2026-08-07T16:08:15.563Z"
+}
