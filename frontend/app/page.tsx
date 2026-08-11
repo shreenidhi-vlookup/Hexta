@@ -22,6 +22,7 @@ import {
   listRecentChats,
   saveChat,
   deleteChat,
+  migrateLegacyChats,
   newChatId,
   deriveTitle,
   type RecentChat,
@@ -180,6 +181,7 @@ export default function HomePage() {
     setIsAdmin(isAdminRole(getTokenRole(token ?? "")));
     setSidebarCollapsed(localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true");
     if (token) {
+      migrateLegacyChats();
       loadSettings();
       setRecentChats(listRecentChats());
     }
