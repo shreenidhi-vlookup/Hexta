@@ -12,10 +12,18 @@ from __future__ import annotations
 
 import re
 
-from app.query_processing import domain_terms
+from app.query_processing import comparison, domain_terms
 from app.query_processing.entity_extraction import Entity
 
 _WORD_RE = re.compile(r"[a-z]+")
+
+# Metrics whose min/max wording is a qualifying threshold ("minimum credit
+# score", "minimum down payment") rather than a numeric cap the borrower is
+# optimizing ("maximum LTV", "max loan amount"). Without this, "minimum"/
+# "maximum" being in INTENT_KEYWORDS["limits"] makes every such question
+# match "limits" before the "requirements" branch is ever reached, since
+# "limits" has higher precedence.
+_REQUIREMENT_THRESHOLD_METRICS = {"credit score", "down payment"}
 
 
 def detect_intent(text: str, entities: list[Entity]) -> str:
@@ -33,12 +41,27 @@ def detect_intent(text: str, entities: list[Entity]) -> str:
     if "loan to value" in [e.canonical for e in entities]:
         if words & domain_terms.INTENT_KEYWORDS["limits"]:
             return "limits"
+    if any(e.canonical in _REQUIREMENT_THRESHOLD_METRICS for e in entities):
+        if words & domain_terms.INTENT_KEYWORDS["limits"]:
+            return "requirements"
+
+    # A comparison question ("FHA vs VA", "difference between X and Y") is
+    # asking what each thing IS, not whether the asker is eligible for one —
+    # route it to "definition" at that precedence slot (comparison.py
+    # already has the tested pattern set for recognizing these; reuse it
+    # instead of duplicating regexes here).
+    is_comparison_q = comparison.is_comparison(text)
 
     for intent in ("costs", "limits", "documents", "eligibility", "requirements", "process", "definition"):
         kws = domain_terms.INTENT_KEYWORDS[intent]
-        if any(kw in lower for kw in kws):
+        matched = any(kw in lower for kw in kws)
+        if intent == "definition" and is_comparison_q:
+            matched = True
+        if matched:
             return intent
 
+    # Unreachable for comparison questions: the loop above always resolves
+    # them at the "definition" slot before falling through here.
     if any(e.term_type == "document" for e in entities):
         return "documents"
     if any(e.term_type == "metric" for e in entities):
