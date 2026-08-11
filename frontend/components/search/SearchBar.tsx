@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Send, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   SpeechInput,
   SpeechInputRecordButton,
-  SpeechInputPreview,
   SpeechInputCancelButton,
   type SpeechInputData,
 } from "@/components/ui/speech-input";
@@ -29,6 +28,12 @@ export default function SearchBar({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(pointer: coarse)").matches
+    ) {
+      return;
+    }
     inputRef.current?.focus();
   }, []);
 
@@ -37,6 +42,7 @@ export default function SearchBar({
     const trimmed = query.trim();
     if (trimmed && !isLoading) {
       onSearch(trimmed);
+      setQuery("");
     }
   };
 
@@ -53,8 +59,8 @@ export default function SearchBar({
     (data: SpeechInputData) => {
       setIsListening(false);
       const transcript = data.transcript.trim();
+      setQuery("");
       if (transcript) {
-        setQuery(transcript);
         onSearch(transcript);
       }
     },
@@ -63,6 +69,7 @@ export default function SearchBar({
 
   const handleSpeechCancel = useCallback(() => {
     setIsListening(false);
+    setQuery("");
   }, []);
 
   return (
@@ -70,6 +77,22 @@ export default function SearchBar({
       onSubmit={handleSubmit}
       className="relative mx-auto w-full max-w-3xl lg:max-w-4xl"
     >
+      {isListening && (
+        <div className="absolute bottom-full left-0 right-0 z-20 mb-3 rounded-xl border border-border bg-card p-3 shadow-md">
+          <div className="flex items-center gap-3">
+            <BarVisualizer
+              demo
+              state="listening"
+              barCount={12}
+              className="h-6 w-24 shrink-0"
+            />
+            <p className="min-w-0 flex-1 truncate text-sm text-foreground">
+              {query.trim() || "Listening..."}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="relative">
         <Input
           ref={inputRef}
@@ -79,18 +102,10 @@ export default function SearchBar({
           placeholder={placeholder}
           disabled={isLoading || isListening}
           maxLength={500}
+          aria-label="Ask about requirements"
           className="pl-12 pr-40 py-6 text-lg rounded-xl shadow-sm"
         />
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-
-        {isListening && (
-          <BarVisualizer
-            demo
-            state="listening"
-            barCount={9}
-            className="absolute inset-x-2 bottom-1.5 h-7 rounded-md bg-transparent p-0 items-end"
-          />
-        )}
 
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
           <SpeechInput
@@ -100,7 +115,6 @@ export default function SearchBar({
             onCancel={handleSpeechCancel}
             size="lg"
           >
-            <SpeechInputPreview placeholder="Listening..." />
             <SpeechInputRecordButton />
             <SpeechInputCancelButton />
           </SpeechInput>
@@ -109,12 +123,12 @@ export default function SearchBar({
             size="icon"
             disabled={isLoading || !query.trim()}
             className="rounded-lg w-10 h-10"
-            aria-label="Search"
+            aria-label="Send message"
           >
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              <Search className="w-4 h-4" />
+              <Send className="w-4 h-4" />
             )}
           </Button>
         </div>

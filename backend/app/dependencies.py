@@ -62,7 +62,9 @@ async def get_current_user(
     with acquire() as conn:
         with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
-                "SELECT id, email, full_name, role, department, allowed_departments, is_active "
+                "SELECT id, email, full_name, role, department, "
+                "allowed_departments, client_id, is_active, "
+                "assigned_clients, assigned_cases "
                 "FROM users WHERE id = %s AND is_active = true",
                 (user_id,),
             )

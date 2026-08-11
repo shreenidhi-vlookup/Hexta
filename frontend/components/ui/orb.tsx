@@ -1,6 +1,6 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { motion, useReducedMotion } from "framer-motion"
 
 export type AgentState = "talking" | "listening" | null
 
@@ -10,13 +10,14 @@ interface OrbProps {
 }
 
 export function Orb({ agentState, className }: OrbProps) {
+  const reduceMotion = useReducedMotion()
   const isActive = agentState === "talking" || agentState === "listening"
 
   return (
     <motion.div
       className={className}
       animate={
-        isActive
+        isActive && !reduceMotion
           ? {
               scale: [1, 1.15, 1],
               opacity: [0.7, 1, 0.7],
@@ -24,7 +25,7 @@ export function Orb({ agentState, className }: OrbProps) {
           : { scale: 1, opacity: 0.5 }
       }
       transition={
-        isActive
+        isActive && !reduceMotion
           ? {
               repeat: Infinity,
               duration: 1.2,

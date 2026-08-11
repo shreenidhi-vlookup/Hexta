@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { motion } from "framer-motion"
+import { motion, useReducedMotion } from "framer-motion"
 import { MicIcon, SquareIcon, XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -257,7 +257,7 @@ const SpeechInput = React.forwardRef<HTMLDivElement, SpeechInputProps>(
           className={cn(
             "relative inline-flex items-center overflow-hidden rounded-md transition-all duration-200",
             recognition.isConnected
-              ? "bg-background dark:bg-muted shadow-[inset_0_0_0_1px_var(--color-input),0_1px_2px_0_rgba(0,0,0,0.05)]"
+              ? "bg-background shadow-[inset_0_0_0_1px_hsl(var(--input)),0_1px_2px_0_rgba(0,0,0,0.05)]"
               : "",
             className
           )}
@@ -375,6 +375,7 @@ const SpeechInputPreview = React.forwardRef<
   ref
 ) {
   const speechInput = useSpeechInput()
+  const reduceMotion = useReducedMotion()
 
   const displayText = speechInput.transcript || placeholder
   const showPlaceholder = !speechInput.transcript.trim()
@@ -398,7 +399,7 @@ const SpeechInputPreview = React.forwardRef<
       <div className="absolute inset-y-0 -right-1 -left-1 [mask-image:linear-gradient(to_right,transparent,black_10px,black_calc(100%-10px),transparent)]">
         <motion.p
           key="text"
-          layout="position"
+          layout={reduceMotion ? false : "position"}
           className="absolute top-0 right-0 bottom-0 flex h-full min-w-full items-center px-1 whitespace-nowrap"
         >
           {displayText}

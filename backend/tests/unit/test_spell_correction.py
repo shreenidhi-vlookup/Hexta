@@ -41,6 +41,28 @@ class TestBasicCorrection:
         result = correct("what is the minimum credit score")
         assert result == "what is the minimum credit score"
 
+    def test_short_question_starter_typo_fixed(self):
+        result = correct("wht is the eligibility for a mortgage")
+        assert result.startswith("what")
+
+    def test_wat_typo_fixed_to_what(self):
+        result = correct("wat is the minimum credit score")
+        assert result.startswith("what")
+
+    def test_domain_acronyms_not_mangled_to_starters(self):
+        assert correct("max dti") == "max dti"
+        assert correct("max ltv") == "max ltv"
+        assert correct("fha loan") == "fha loan"
+        assert correct("what is apr") == "what is apr"
+
+    def test_credit_scope_hint_prefers_score_over_escrow(self):
+        """Regression: 'credit scro' must correct to 'credit score', not the
+        string-closer generic match 'escrow' (both are in the vocab). The
+        domain hint 'credit' should bias the choice toward 'score'."""
+        result = correct("what is the minimum credit scro required")
+        assert "score" in result
+        assert "escrow" not in result
+
     def test_investment_property_misspelled(self):
         result = correct("max ltv for investmnt properti")
         assert "investment" in result
@@ -158,6 +180,48 @@ class TestNoFalseCorrections:
         result = correct("xyzqwerty plm")
         # Should not be 'corrected' to something unrelated
         assert "xyzqwerty" in result
+
+
+class TestPhraseComponentProtection:
+    """Regression: single words inside multi-word aliases must not be
+    fuzzy-corrected into a DIFFERENT word.
+
+    ``finance`` (from "bridging finance") was being rewritten to
+    ``refinance`` (ratio 87.5 against the COMMON_WORDS entry), turning a
+    correctly-spelled bridging-finance question into a refinance question.
+    """
+
+    def test_finance_not_mangled_to_refinance(self):
+        result = correct("how does bridging finance work")
+        assert "finance" in result
+        assert "refinance" not in result
+
+    def test_finance_not_mangled_in_typo_query(self):
+        result = correct("how does bridgng finance work")
+        assert "finance" in result
+        assert "refinance" not in result
+
+    def test_bridging_protected(self):
+        result = correct("bridging finance costs")
+        assert "bridging" in result
+
+    def test_lifetime_protected(self):
+        result = correct("what is a lifetime mortgage")
+        assert "lifetime" in result
+
+    def test_insurance_protected(self):
+        result = correct("what does income protection insurance cover")
+        assert "insurance" in result
+        assert "protection" in result
+
+    def test_common_finance_words_protected(self):
+        for q in (
+            "what are the financial requirements",
+            "how much can i borrow",
+            "what is the repayment period",
+        ):
+            result = correct(q)
+            assert "refinance" not in result
 
 
 class TestEmptyInput:

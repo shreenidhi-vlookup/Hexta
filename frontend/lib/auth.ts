@@ -51,6 +51,21 @@ export async function getSession(): Promise<UserSession | null> {
   }
 }
 
+export function getTokenRole(token: string): string | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return typeof payload.role === 'string' ? payload.role : null;
+  } catch {
+    return null;
+  }
+}
+
+export const ADMIN_ROLES = new Set(["super_admin", "admin"]);
+
+export function isAdminRole(role: string | null): boolean {
+  return role !== null && ADMIN_ROLES.has(role);
+}
+
 export function isTokenExpired(token: string): boolean {
   try {
     const payload = JSON.parse(atob(token.split('.')[1]));

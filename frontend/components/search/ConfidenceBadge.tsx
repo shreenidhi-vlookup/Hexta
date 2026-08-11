@@ -24,13 +24,13 @@ export default function ConfidenceBadge({
   const getVariant = () => {
     switch (routing) {
       case "answer":
-        return "bg-green-100 text-green-800 border-green-200 hover:bg-green-100";
+        return "bg-success/10 text-success border-success/30";
       case "partial":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-100";
+        return "bg-warning/10 text-warning border-warning/30";
       case "no_answer":
-        return "bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-100";
+        return "bg-muted text-muted-foreground border-border";
       default:
-        return "bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100";
+        return "bg-accent/40 text-accent-foreground border-border";
     }
   };
 
@@ -62,6 +62,7 @@ export default function ConfidenceBadge({
 
   return (
     <Badge
+      variant="outline"
       className={cn(
         "inline-flex items-center gap-1.5 font-medium whitespace-nowrap",
         sizeClasses[size],

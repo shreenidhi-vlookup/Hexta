@@ -17,7 +17,7 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
     className={cn(
       "group flex w-full items-end gap-2 py-4",
       from === "user"
-        ? "is-user flex-row-reverse justify-end"
+        ? "is-user flex-row-reverse"
         : "is-assistant flex-row items-start",
       className
     )}

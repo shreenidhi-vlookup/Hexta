@@ -1,7 +1,7 @@
 """Document management API endpoints.
 
 Per CLAUDE.md rule 5: the upload endpoint lives in upload.py.
-This file only contains the list endpoint for admin review.
+This file contains the list endpoint and document approval endpoint for admin review.
 """
 
 from __future__ import annotations
@@ -28,10 +28,51 @@ async def list_documents(
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, title, source_path, doc_type, department, "
-                "is_active, is_approved, version, created_at "
+                "is_active, is_approved, client_id, property_id, case_id, version, created_at "
                 "FROM documents ORDER BY created_at DESC LIMIT %s OFFSET %s",
                 (limit, offset),
             )
             documents = [dict(row) for row in cur.fetchall()]
 
     return {"documents": documents}
+
+
+@router.patch("/{document_id}/approve")
+async def approve_document(
+    document_id: int,
+    user: dict = Depends(require_auth),
+) -> dict:
+    """Approve a pending document and its chunks (requires admin role)."""
+    require_role(user, "admin")
+
+    with acquire() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE documents SET is_approved = true "
+                "WHERE id = %s AND is_active = true "
+                "RETURNING id, title, is_approved",
+                (document_id,),
+            )
+            doc_row = cur.fetchone()
+
+            if doc_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Document not found or inactive",
+                )
+
+            cur.execute(
+                "UPDATE document_chunks SET is_approved = true "
+                "WHERE document_id = %s AND is_active = true",
+                (document_id,),
+            )
+            chunks_updated = cur.rowcount
+
+            conn.commit()
+
+    return {
+        "message": "Document approved",
+        "document_id": doc_row["id"],
+        "title": doc_row["title"],
+        "chunks_updated": chunks_updated,
+    }

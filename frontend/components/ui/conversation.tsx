@@ -16,6 +16,7 @@ export const Conversation = ({ className, ...props }: ConversationProps) => (
     initial="smooth"
     resize="smooth"
     role="log"
+    aria-atomic="false"
     {...props}
   />
 )
@@ -85,7 +86,7 @@ export const ConversationScrollButton = ({
     !isAtBottom && (
       <Button
         className={cn(
-          "bg-background dark:bg-background absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full shadow-md",
+          "bg-background absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full shadow-md",
           className
         )}
         onClick={handleScrollToBottom}

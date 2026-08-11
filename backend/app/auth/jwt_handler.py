@@ -20,12 +20,17 @@ def create_token(
     role: str = "loan_officer",
     department: str = "general",
     allowed_departments: list[str] | None = None,
+    client_id: str | None = None,
+    assigned_clients: list[str] | None = None,
+    assigned_cases: list[str] | None = None,
 ) -> str:
     """Create a signed JWT for the given user.
 
     The token carries RBAC-relevant claims used by metadata_filters.py
-    at search time: user role, primary department, and the full list of
-    departments the user may query.
+    at search time: user role, primary department, the full list of
+    departments the user may query, and (for client users) the client_id
+    scope. Staff may additionally carry assigned_clients and assigned_cases
+    for fine-grained scoping (Phase 3b).
     """
     now = int(time.time())
     payload = {
@@ -36,6 +41,12 @@ def create_token(
         "iat": now,
         "exp": now + (settings.jwt_expiry_minutes * 60),
     }
+    if client_id is not None:
+        payload["client_id"] = client_id
+    if assigned_clients:
+        payload["assigned_clients"] = assigned_clients
+    if assigned_cases:
+        payload["assigned_cases"] = assigned_cases
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

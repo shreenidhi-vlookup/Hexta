@@ -200,3 +200,200 @@ export async function submitFeedback(
 
   return response.json();
 }
+
+// --- Admin panel ---
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  full_name: string | null;
+  role: string;
+  department: string;
+  allowed_departments: string[];
+  client_id: string | null;
+  assigned_clients: string[];
+  assigned_cases: string[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AdminDocument {
+  id: number;
+  title: string;
+  source_path: string | null;
+  doc_type: string;
+  department: string;
+  is_active: boolean;
+  is_approved: boolean;
+  client_id: string | null;
+  property_id: string | null;
+  case_id: string | null;
+  version: number;
+  created_at: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  email: string | null;
+  query: string;
+  sub_queries?: unknown;
+  confidence: number | null;
+  outcome: string | null;
+  latency_ms: number | null;
+  created_at: string;
+}
+
+export interface FeedbackEntry {
+  id: number;
+  email: string | null;
+  rating: number;
+  comment: string | null;
+  response_id: string;
+  created_at: string;
+}
+
+export interface KnowledgeGap {
+  id: number;
+  query: string;
+  intent: string | null;
+  confidence: number | null;
+  acknowledged: boolean;
+  acknowledged_at: string | null;
+  acknowledged_by_email: string | null;
+  created_at: string;
+}
+
+export interface AdminStats {
+  users: number;
+  active_users: number;
+  documents: number;
+  active_documents: number;
+  chunks: number;
+  queries: number;
+  no_answer: number;
+  avg_confidence: number;
+  thumbs_up: number;
+  thumbs_down: number;
+  knowledge_gaps: number;
+  recent_activity: AuditEntry[];
+}
+
+async function adminFetch<T>(path: string, token: string, method: string = "GET"): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Admin request failed');
+  }
+
+  return response.json();
+}
+
+export async function getAdminStats(token: string): Promise<{ stats: AdminStats }> {
+  return adminFetch('/admin/stats', token);
+}
+
+export async function getAdminUsers(token: string): Promise<{ users: AdminUser[] }> {
+  return adminFetch('/admin/users', token);
+}
+
+export async function getAdminDocuments(
+  token: string
+): Promise<{ documents: AdminDocument[] }> {
+  return adminFetch('/documents/', token);
+}
+
+export async function getAdminAudit(
+  token: string,
+  limit = 100
+): Promise<{ audit: AuditEntry[] }> {
+  return adminFetch(`/admin/audit?limit=${limit}`, token);
+}
+
+export async function getAdminFeedback(
+  token: string,
+  limit = 100
+): Promise<{ feedback: FeedbackEntry[] }> {
+  return adminFetch(`/admin/feedback?limit=${limit}`, token);
+}
+
+export async function getKnowledgeGaps(
+  token: string,
+  limit = 100
+): Promise<{ knowledge_gaps: KnowledgeGap[] }> {
+  return adminFetch(`/analytics/knowledge-gaps?limit=${limit}`, token);
+}
+
+export async function acknowledgeGap(
+  gapId: number,
+  token: string
+): Promise<{ message: string; gap_id: number }> {
+  return adminFetch(`/analytics/knowledge-gaps/${gapId}/acknowledge`, token, "POST");
+}
+
+export async function uploadDocument(
+  file: File,
+  token: string
+): Promise<{
+  message: string;
+  filename: string;
+  stored_as: string;
+  size_bytes: number;
+}> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/documents/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Upload failed");
+  }
+
+  return response.json();
+}
+
+export async function updateUserAdmin(
+  userId: number,
+  patch: Partial<AdminUser & { role?: string }>,
+  token: string
+): Promise<{ user: AdminUser }> {
+  const response = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Update failed");
+  }
+
+  return response.json();
+}
+
+export async function approveDocument(
+  documentId: number,
+  token: string
+): Promise<{ message: string; document_id: number; title: string; chunks_updated: number }> {
+  const response = await fetch(`${API_BASE_URL}/documents/${documentId}/approve`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Approval failed");
+  }
+
+  return response.json();
+}
