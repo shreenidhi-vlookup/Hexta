@@ -40,7 +40,31 @@ class ValidationResult:
 
 
 def validate_upload(filename: str, file_size: int) -> ValidationResult:
-    """Validate a file name and size against configured limits."""
+    """Validate a file name and size against configured limits.
+
+    Rejects filenames that carry path components (``..``, ``/``, ``\\``,
+    or a null byte) before anything else — the upload endpoint later
+    builds a destination path from this filename, so an unsanitized value
+    could otherwise write outside ``storage/pending/`` (path traversal).
+    Checked on the raw string, not via ``pathlib.Path``, because prod runs
+    on Linux where ``Path`` does not treat ``\\`` as a separator but the
+    OS's own traversal-relevant characters must be blocked regardless of
+    which platform validates the upload.
+    """
+    if (
+        not filename
+        or "\x00" in filename
+        or "/" in filename
+        or "\\" in filename
+        or filename in (".", "..")
+    ):
+        return ValidationResult(
+            valid=False,
+            filename=filename,
+            error="Filename must not contain path separators.",
+            file_size=file_size,
+        )
+
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         return ValidationResult(
