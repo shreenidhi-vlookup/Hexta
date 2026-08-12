@@ -91,3 +91,15 @@ class TestMinTokensMerge:
         text = f"{at_threshold}\n\n{at_threshold}"
         chunks = list(self._chunker(min_tokens=10).chunk(self._extracted(text)))
         assert len(chunks) == 2
+
+    def test_merge_never_undoes_a_max_tokens_split(self):
+        """Regression: when min_tokens is close to max_tokens, every chunk
+        recursive_chunker just split out of an oversized block is itself
+        "small" relative to min_tokens -- without a max_tokens cap on the
+        merge, they'd all get folded straight back into one oversized
+        chunk, silently undoing the split that was just enforced."""
+        text = "This is a test. " * 100  # ~400 tokens, well over max_tokens
+        chunks = list(self._chunker(min_tokens=50, max_tokens=50).chunk(self._extracted(text)))
+        assert len(chunks) > 1
+        for c in chunks:
+            assert self._chunker()._count_tokens(c.content) <= 50 + 5  # small slack for join boundaries
