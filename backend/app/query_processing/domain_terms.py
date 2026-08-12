@@ -268,6 +268,38 @@ def canonical_of(alias: str) -> str:
     return entry[0] if entry else alias
 
 
+# Plain-English synonym pairs that are semantically identical in a mortgage
+# context but not lexical-stem variants of each other (unlike
+# "applicant"/"application", which search.py's light suffix stemmer already
+# bridges). Used by search.py's query<->answer relevance gate so a correctly
+# retrieved paraphrase ("how do lenders verify I have a job") isn't scored
+# as off-topic just because the answer text says "employment verification"
+# instead of "verify job". Intentionally small and curated, not an attempt
+# at general synonymy — add pairs here only when a real query surfaces a gap
+# (see the git history for the job/verify pair's origin).
+RELEVANCE_SYNONYMS: dict[str, frozenset[str]] = {
+    "job": frozenset({"employment", "employed", "employer", "employers"}),
+    "verify": frozenset({"verification", "verified", "verifying"}),
+}
+
+
+def relevance_synonyms_of(term: str) -> frozenset[str]:
+    """Synonym set for ``term`` under RELEVANCE_SYNONYMS, symmetric.
+
+    Looks up ``term`` as a key first; if not found, checks whether it
+    appears as a *value* under some other key and returns that key's full
+    group instead, so the mapping works in both directions (looking up
+    "employment" finds the "job" group too).
+    """
+    direct = RELEVANCE_SYNONYMS.get(term)
+    if direct is not None:
+        return direct
+    for key, group in RELEVANCE_SYNONYMS.items():
+        if term in group:
+            return frozenset({key}) | group
+    return frozenset()
+
+
 def type_of(alias: str) -> str | None:
     entry = _ALIAS_INDEX.get(alias)
     return entry[1] if entry else None

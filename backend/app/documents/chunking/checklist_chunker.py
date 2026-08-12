@@ -28,44 +28,46 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
     and splits them into separate chunks. Only yields chunks if at least
     one list item is detected — plain paragraphs are not treated as
     checklists.
+
+    A block can open with non-list preamble text before the first bullet
+    (e.g. "Required documents for your application:\n- Pay stubs\n...").
+    That preamble is yielded as its own ``chunk_type="paragraph"`` chunk,
+    never as ``"checklist"`` — it isn't a list item and mislabeling it hid
+    it from downstream merge/size logic that treats "checklist" chunks as
+    already-final.
     """
     lines = text.split("\n")
+    if not any(_is_list_item(l.strip()) for l in lines):
+        return
+
     current_item: list[str] = []
-    found_any = False
+    current_is_list = False
+
+    def _flush() -> Iterator[ChecklistChunk]:
+        if current_item:
+            yield ChecklistChunk(
+                content="\n".join(current_item),
+                section=section,
+                chunk_type="checklist" if current_is_list else "paragraph",
+                page_number=page_number,
+            )
 
     for line in lines:
         stripped = line.strip()
         if not stripped:
-            if current_item and found_any:
-                yield ChecklistChunk(
-                    content="\n".join(current_item),
-                    section=section,
-                    chunk_type="checklist",
-                    page_number=page_number,
-                )
-                current_item = []
+            yield from _flush()
+            current_item = []
+            current_is_list = False
             continue
 
         if _is_list_item(stripped):
-            found_any = True
-            if current_item and found_any:
-                yield ChecklistChunk(
-                    content="\n".join(current_item),
-                    section=section,
-                    chunk_type="checklist",
-                    page_number=page_number,
-                )
+            yield from _flush()
             current_item = [stripped]
+            current_is_list = True
         else:
             current_item.append(stripped)
 
-    if current_item and found_any:
-        yield ChecklistChunk(
-            content="\n".join(current_item),
-            section=section,
-            chunk_type="checklist",
-            page_number=page_number,
-        )
+    yield from _flush()
 
 
 def _is_list_item(line: str) -> bool:

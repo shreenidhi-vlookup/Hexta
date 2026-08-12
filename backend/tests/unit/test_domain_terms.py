@@ -19,6 +19,13 @@ class TestNewVocabulary:
     def test_data_erasure_alias(self):
         assert domain_terms.canonical_of("delete my data") == "data erasure"
 
+    def test_relevance_synonyms_job_employment_symmetric(self):
+        assert "employment" in domain_terms.relevance_synonyms_of("job")
+        assert "job" in domain_terms.relevance_synonyms_of("employment")
+
+    def test_relevance_synonyms_unknown_term_empty(self):
+        assert domain_terms.relevance_synonyms_of("mortgage") == frozenset()
+
     def test_unknown_alias_returns_itself_unchanged(self):
         """Regression: canonical_of() used to be
         ``_ALIAS_INDEX.get(alias, alias)[0]`` — for an alias with no index

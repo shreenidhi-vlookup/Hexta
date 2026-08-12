@@ -144,6 +144,27 @@ class TestRelevanceGate:
     def test_recalibrate_never_raises(self):
         assert _recalibrate_confidence_stub(100.0, 1.0) == 100.0
 
+    def test_domain_synonym_job_employment_bridged(self):
+        """Regression: "job" and "employment" mean the same thing here but
+        share no stem -- relevance used to be 0.0 for this pair, which
+        crushed a correctly-retrieved paraphrase's confidence below the
+        no_answer floor. domain_terms.RELEVANCE_SYNONYMS bridges it."""
+        rel = _relevance_factor(
+            "how do lenders verify I have a job",
+            "Documentation required for loan applications includes proof of "
+            "income, tax returns, bank statements, and employment "
+            "verification.",
+        )
+        assert rel > 0.0
+
+    def test_auxiliary_verbs_not_treated_as_content_terms(self):
+        """"have"/"has"/"do"/etc. are grammatical scaffolding, not content
+        -- they used to count as query terms the answer had to literally
+        contain, penalizing relevance for no reason."""
+        terms = _query_content_terms("how do lenders verify I have a job")
+        assert "have" not in terms
+        assert "do" not in terms
+
     def test_recalibrate_keeps_high_relevance(self):
         assert _recalibrate_confidence_stub(96.9, 0.80) == 96.9
 
