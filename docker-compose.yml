@@ -46,7 +46,26 @@ services:
     deploy:
       resources:
         limits:
-          memory: 200m
+          # Dev-only cap, raised from 200m (CLAUDE.md rule 10's documented
+          # default, which applies to the production infra/shared/
+          # docker-compose.yml + systemd deployment). In THIS local dev
+          # compose file the backend runs continuously (not socket-
+          # activated) and keeps a fastembed embedding model resident for
+          # query-time vector search. An upload's auto-triggered ingestion
+          # subprocess (app.documents.auto_ingest.trigger_ingestion,
+          # CLAUDE.md rule 5) loads a *second*, independent copy of the
+          # same model to embed the new chunks -- it's a separate OS
+          # process but still shares this container's cgroup memory limit.
+          # Two model instances resident at once blew past 200m and the
+          # kernel OOM-killed the whole container (exit 137), silently
+          # dropping the ingestion subprocess before it could process the
+          # uploaded file. 512m gives enough headroom for both to coexist
+          # during that brief overlap. Production's socket-activated
+          # deployment structurally avoids this overlap (the API process
+          # isn't necessarily running when ingestion fires), which is why
+          # this is a dev-compose-only change, not a change to CLAUDE.md's
+          # documented production budget.
+          memory: 512m
     command: >
       uvicorn app.main:app
       --workers 1

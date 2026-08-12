@@ -19,6 +19,64 @@ from app.documents.chunking.structural_chunker import Chunk, StructuralChunker
 from app.documents.text_extraction import ExtractedText
 
 
+class TestTableDetection:
+    """Regression coverage for a real-world failure found via manual
+    upload testing: a plain-text table with multi-word cell values
+    ("Property Type", "Investment Property") was silently swallowed into
+    the surrounding paragraph instead of being kept as an atomic table
+    chunk, because _is_table_block used to split each line on *any*
+    whitespace -- multi-word cells made the per-row word count diverge
+    even though the column count was identical."""
+
+    def _chunker(self):
+        return StructuralChunker()
+
+    def test_multiword_cells_detected_as_table(self):
+        table_text = (
+            "Property Type       Max LTV   Min Down Payment\n"
+            "Primary Residence    97%        3%\n"
+            "Second Home          90%        10%\n"
+            "Investment Property  85%        15%"
+        )
+        assert self._chunker()._is_table_block(table_text)
+
+    def test_table_survives_full_pipeline_as_atomic_chunk(self):
+        text = (
+            "Loan-to-Value Limits by Property Type\n\n"
+            "Property Type       Max LTV   Min Down Payment\n"
+            "Primary Residence    97%        3%\n"
+            "Second Home          90%        10%\n"
+            "Investment Property  85%        15%\n\n"
+            "Closing costs are itemized separately."
+        )
+        extracted = ExtractedText(text=text, pages=[text], source_format="txt")
+        chunks = list(self._chunker().chunk(extracted))
+        table_chunks = [c for c in chunks if c.chunk_type == "table"]
+        assert len(table_chunks) == 1
+        assert "Investment Property" in table_chunks[0].content
+        assert "Primary Residence" in table_chunks[0].content
+
+    def test_single_word_cell_table_still_detected(self):
+        # Single-word cells, column-aligned with the same 2+-space
+        # convention real plain-text tables use.
+        table_text = "a    b    c\nd    e    f\ng    h    i"
+        assert self._chunker()._is_table_block(table_text)
+
+    def test_single_space_table_still_detected_via_fallback(self):
+        # Pre-existing behavior (test_documents.py::test_chunk_preserves_tables)
+        # relies on single-space, single-word-cell tables ("col1 col2 col3")
+        # still being detected -- kept as a fallback when the stronger
+        # 2+-space column signal isn't present.
+        assert self._chunker()._is_table_block("a b c\nd e f\ng h i")
+
+    def test_prose_not_misdetected_as_table(self):
+        prose = (
+            "This is a normal paragraph about mortgage underwriting.\n"
+            "It has several sentences describing the process in detail."
+        )
+        assert not self._chunker()._is_table_block(prose)
+
+
 class TestChecklistPreambleLabel:
     def test_preamble_before_first_bullet_is_paragraph_not_checklist(self):
         text = "Required documents for your application:\n- Pay stubs\n- Bank statements"

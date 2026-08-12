@@ -328,21 +328,37 @@ class StructuralChunker:
             )
 
     def _is_table_block(self, text: str) -> bool:
-        """Detect table-like text blocks (2+ rows, consistent columns)."""
+        """Detect table-like text blocks (2+ rows, consistent columns).
+
+        Tries column-aligned splitting first: cells separated by runs of
+        2+ whitespace characters, the convention plain-text tables use to
+        align columns. This is the strong signal -- it correctly handles
+        multi-word cells ("Property Type", "Investment Property", "Min
+        Down Payment"), which the naive any-whitespace split breaks on
+        (each row's *word* count stops matching even though its *column*
+        count is identical, so a real table silently fails detection and
+        gets swallowed into the surrounding paragraph as prose).
+
+        Falls back to splitting on any whitespace for tables that use
+        single-space-separated single-word cells with no double-space
+        alignment ("col1 col2 col3") -- weaker signal, more prone to
+        false-positiving on ordinary prose, but kept so plain tables that
+        were already detected before this fix stay detected.
+        """
         lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
         if len(lines) < 2:
             return False
 
-        first_line_cells = len(lines[0].split())
-        if first_line_cells < 3:
+        if self._consistent_columns(lines, r"\s{2,}"):
+            return True
+        return self._consistent_columns(lines, r"\s+")
+
+    @staticmethod
+    def _consistent_columns(lines: list[str], cell_sep: str) -> bool:
+        cell_counts = [len(re.split(cell_sep, line)) for line in lines]
+        if cell_counts[0] < 3:
             return False
-
-        # Check first 3 lines have consistent column count
-        consistent_count = 0
-        for line in lines:
-            if len(line.split()) == first_line_cells:
-                consistent_count += 1
-
+        consistent_count = sum(1 for c in cell_counts if c == cell_counts[0])
         return consistent_count >= 2
 
     def _count_tokens(self, text: str) -> int:
