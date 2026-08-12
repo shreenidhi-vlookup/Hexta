@@ -68,6 +68,36 @@ class TestPackageBuilder:
         assert package.response_id  # non-empty
         assert package.confidence > 0
 
+    def test_table_excerpt_gets_verbatim_answer_phrase(self):
+        """Regression: a table excerpt used to always get answer_phrase ""
+        (its short rows have no terminal punctuation, so
+        _extract_answer_phrase's prose-oriented heading check rejected
+        every line), which made search.py's _decide_routing() force
+        no_answer regardless of confidence -- discarding a correctly
+        retrieved, high-confidence table answer entirely. Live-verified:
+        an LTV-limits table at 98.4% confidence surfaced "No answer
+        found" before this fix."""
+        candidates = [
+            RankedCandidate(
+                chunk_id=1,
+                content=(
+                    "Property Type       Max LTV   Min Down Payment\n"
+                    "Primary Residence    97%        3%\n"
+                    "Investment Property  85%        15%"
+                ),
+                document_id=1, title="LTV Policy", section=None, chunk_type="table",
+                department="general", bm25_score=0.8, vec_score=0.9,
+                rrf_score=0.05, combined_rank=1,
+                is_approved=True, document_version=1,
+            ),
+        ]
+        package = build_response_package(
+            candidates=candidates,
+            query_text="what is the max ltv for investment property",
+        )
+        assert package.answer_phrase != ""
+        assert "Investment Property" in package.answer_phrase
+
     def test_build_package_empty_candidates(self):
         package = build_response_package(
             candidates=[],
