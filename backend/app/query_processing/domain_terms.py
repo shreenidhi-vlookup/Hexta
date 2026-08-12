@@ -204,6 +204,7 @@ COMMON_WORDS: set[str] = {
      "deposit", "deposits", "debt", "debts", "repay", "repayment",
      "repayments", "repaid", "remortgage", "protection", "insurance",
      "affordability", "collateral", "creditworthiness",
+     "verify", "verified", "verification", "job", "jobs",
 }
 
 # Phrases that indicate a new question when they start a fragment.
@@ -253,7 +254,18 @@ def aliases() -> set[str]:
 
 
 def canonical_of(alias: str) -> str:
-    return _ALIAS_INDEX.get(alias, alias)[0]
+    """Canonical form of a known alias, or ``alias`` unchanged if unknown.
+
+    Bug history: this used to be ``_ALIAS_INDEX.get(alias, alias)[0]`` — when
+    ``alias`` wasn't in the index, the fallback was the bare string ``alias``,
+    and the trailing ``[0]`` then indexed into *that string*, silently
+    returning just its first character instead of the alias itself. Callers
+    that don't happen to filter short results (unlike search.py's
+    ``_query_content_terms``, which drops anything under 3 chars) would get
+    a corrupted single-character "canonical" term.
+    """
+    entry = _ALIAS_INDEX.get(alias)
+    return entry[0] if entry else alias
 
 
 def type_of(alias: str) -> str | None:

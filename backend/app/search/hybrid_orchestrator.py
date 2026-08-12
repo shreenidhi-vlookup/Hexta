@@ -16,6 +16,7 @@ from typing import Sequence
 
 from psycopg import Connection
 
+from app.ranking.weights_config import DEFAULT_WEIGHTS
 from app.search.bm25_search import build_tsquery
 from app.search.metadata_filters import get_search_filter
 from app.search.pgvector_search import embed_query
@@ -72,15 +73,29 @@ def search_knowledge_base(
     # RBAC filter — applied in WHERE clause
     rbac_clause, rbac_params = get_search_filter(user)
 
+    # A chunk is admitted to the candidate set if EITHER it has some BM25
+    # keyword overlap OR its vector similarity clears min_vector_similarity
+    # on its own. BM25 match used to be a hard, unconditional WHERE-clause
+    # gate: a well-formed, correctly-spelled paraphrase that shares no
+    # vocabulary with the relevant chunk ("how do lenders verify I have a
+    # job" vs. a chunk about "employment verification") returned zero
+    # candidates, because pgvector's semantic match was never even
+    # considered once the tsquery filter excluded the row — defeating the
+    # point of hybrid search. Dropping the gate entirely isn't safe either:
+    # without any floor, truly nonsensical queries also always retrieve
+    # *something* (whatever's nearest in embedding space), which downstream
+    # RRF/confidence logic can inflate into a false high-confidence answer.
+    # The similarity floor is the calibrated middle ground — see
+    # ranking/weights_config.py for the calibration data.
     where_parts: list[str] = [
-        "c.fts @@ to_tsquery('english', %s)",
         "c.is_active = true",
         "c.is_approved = true",
         "d.is_active = true",
         "d.is_approved = true",
         "c.embedding IS NOT NULL",
+        "(c.fts @@ to_tsquery('english', %s) OR (1 - (c.embedding <=> %s)) >= %s)",
     ]
-    where_params: list = [tsquery]
+    where_params: list = [tsquery, query_vector, DEFAULT_WEIGHTS.min_vector_similarity]
 
     if rbac_clause:
         where_parts.append(rbac_clause)
@@ -108,9 +123,8 @@ def search_knowledge_base(
     params: list = [
         tsquery,
         query_vector,
-        tsquery,
     ]
-    params.extend(where_params[1:])
+    params.extend(where_params)
     params.extend([tsquery, query_vector, max_results])
 
     with conn.cursor() as cur:

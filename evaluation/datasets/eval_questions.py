@@ -152,6 +152,25 @@ DATASET = [
         "expected_answer": False,
         "topic_keys": [],
     },
+    {
+        # Regression coverage for the hybrid_orchestrator hard-BM25-gate bug:
+        # this phrasing shares zero vocabulary with the "employment"-topic
+        # chunk ("Borrowers must demonstrate stable employment history...
+        # employment verification includes recent pay stubs..."), so it can
+        # only be retrieved via vector similarity, not keyword overlap. The
+        # old unconditional `c.fts @@ to_tsquery(...)` WHERE-clause gate
+        # excluded the chunk entirely for this query; search/hybrid_orchestrator.py
+        # now admits it via the min_vector_similarity floor instead.
+        "id": 13,
+        "question": "how do lenders verify I have a job",
+        "normalized": "how do lenders verify i have a job",
+        "expected_corrected": "how do lenders verify i have a job",
+        "expected_intent": "process",
+        "expected_entities": [],
+        "expected_sub_questions": 1,
+        "expected_answer": True,
+        "topic_keys": ["employment"],
+    },
 ]
 
 
