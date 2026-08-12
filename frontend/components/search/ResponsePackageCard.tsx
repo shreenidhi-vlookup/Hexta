@@ -129,8 +129,18 @@ export default function ResponsePackageCard({
 }
 
 /**
- * Provenance-only source list: shows where each answer came from
- * (source title + section) without dumping the full excerpt text.
+ * Source list: shows where each answer came from (source title + section)
+ * *and* the excerpt's own retrieved text, verbatim.
+ *
+ * Used to be citation-only (title/section, no text) on the theory that the
+ * headline answer_phrase already covered "the answer". It doesn't always --
+ * answer_phrase is drawn from a single excerpt (the top-ranked or first
+ * cleanly-starting one), so whenever the literal thing being asked about
+ * (a specific figure, a table row) lives in a *supporting* excerpt instead,
+ * it was retrieved correctly and confidently but never actually shown to
+ * the user anywhere in the UI. Rendering excerpt.text here doesn't
+ * introduce any synthesis -- it's the same verbatim text the backend
+ * already sent, just previously discarded at render time.
  */
 function SourceProvenanceList({ excerpts }: { excerpts: SearchExcerpt[] }) {
   return (
@@ -163,6 +173,17 @@ function SourceProvenanceList({ excerpts }: { excerpts: SearchExcerpt[] }) {
               )}
             </div>
           </CardHeader>
+          <CardContent className="pt-0">
+            <p
+              className={
+                excerpt.source.chunk_type === "table"
+                  ? "whitespace-pre-wrap overflow-x-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-snug text-foreground"
+                  : "whitespace-pre-wrap text-xs leading-relaxed text-foreground"
+              }
+            >
+              {excerpt.text}
+            </p>
+          </CardContent>
         </Card>
       ))}
     </div>
