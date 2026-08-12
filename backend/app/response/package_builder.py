@@ -76,7 +76,7 @@ def _truncate(text: str, max_chars: int) -> str:
     return head + "…"
 
 
-_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 _FOOTER_RE = re.compile(r"^(source:|category:|note:|see\s)", re.IGNORECASE)
 _TERMINAL_PUNCT = set(".!?")
 
@@ -107,16 +107,29 @@ def _is_question(sentence: str) -> bool:
     return first in _WH_OPENERS
 
 
+_HEADING_MAX_CHARS = 80
+
+
 def _is_heading(sentence: str) -> bool:
     """True when a fragment is a section heading, not an answer body.
 
-    A heading is a short line with no terminal punctuation (e.g.
-    "Credit Score Requirements", "Identity Verification"). Answer body
-    sentences normally end in a period; anything without one is treated
-    as a header/fragment so it is not surfaced as an answer.
+    A heading is a *short* line with no terminal punctuation (e.g.
+    "Credit Score Requirements", "Identity Verification"). Length is the
+    key signal, not just the absence of ".!?" -- a genuine, long answer
+    sentence that introduces a list ("Required documents include the
+    following items, all of which must be submitted before final
+    approval:") also lacks terminal punctuation (it ends in ":"), and
+    used to be misclassified as a heading purely because of that,
+    leaving no usable answer_phrase for chunks whose lead sentence
+    happens to end a checklist intro this way. Real headings are short;
+    real sentences aren't, regardless of what they end in.
     """
     s = sentence.strip()
-    return bool(s) and s[-1] not in _TERMINAL_PUNCT
+    if not s:
+        return False
+    if s[-1] in _TERMINAL_PUNCT:
+        return False
+    return len(s) <= _HEADING_MAX_CHARS
 
 
 def _strip_leading_heading(text: str) -> str:
@@ -244,9 +257,26 @@ def build_response_package(
         (e for e in excerpts if _starts_cleanly(e.text)),
         excerpts[0] if excerpts else None,
     )
-    answer_phrase = (
-        _extract_answer_phrase(phrase_excerpt.text) if phrase_excerpt else ""
-    )
+    if phrase_excerpt is None:
+        answer_phrase = ""
+    elif phrase_excerpt.source.chunk_type == "table":
+        # _extract_answer_phrase is prose-oriented: it looks for a
+        # sentence ending in terminal punctuation. A table's rows are
+        # short, substantive fragments with no such punctuation -- every
+        # row gets classified as "just a heading" and skipped, so this
+        # always returned "" for a table excerpt. An empty answer_phrase
+        # makes search.py's _decide_routing() force no_answer regardless
+        # of confidence, silently discarding a correctly-retrieved,
+        # high-confidence table (verified live: a query whose best match
+        # was an LTV-limits table scored 98.4% confidence and still
+        # surfaced "No answer found"). Tables are already a complete,
+        # atomic unit of evidence (table_chunker.py never splits one
+        # mid-row) -- the table's own truncated verbatim text stands in
+        # as the phrase directly. No synthesis, just the same length cap
+        # _extract_answer_phrase already applies to prose.
+        answer_phrase = _truncate(phrase_excerpt.text, 200)
+    else:
+        answer_phrase = _extract_answer_phrase(phrase_excerpt.text)
 
     # Generate response_id for audit tracing
     response_id = hashlib.sha256(
