@@ -38,9 +38,67 @@ class StructuralChunker:
     def chunk(self, extracted: ExtractedText) -> Iterator[Chunk]:
         """Chunk the extracted text, respecting structure."""
         if extracted.source_format == "pdf":
-            yield from self._chunk_pdf(extracted)
+            raw = list(self._chunk_pdf(extracted))
         else:
-            yield from self._chunk_plain(extracted)
+            raw = list(self._chunk_plain(extracted))
+        yield from self._merge_small_chunks(raw)
+
+    def _merge_small_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
+        """Fold undersized paragraph chunks into a neighbor.
+
+        ``min_tokens`` was declared on this dataclass but never enforced —
+        any paragraph chunk under the threshold (a stray one-line "Note:",
+        a trailing sentence fragment left over after a max_tokens flush,
+        ...) was emitted as its own standalone chunk. A handful of words
+        makes a low-signal embedding and a weak BM25 document; it rarely
+        contains a complete, retrievable answer on its own. Only
+        ``chunk_type == "paragraph"`` chunks in the same section are
+        merged — tables/checklists are structurally meaningful as-is and
+        are never touched. Merges backward into the previous chunk when
+        possible so no content is dropped; a chunk with no eligible
+        predecessor (e.g. the very first chunk in a section) merges
+        forward into the next one instead.
+        """
+        if not chunks:
+            return chunks
+
+        merged: list[Chunk] = []
+        for c in chunks:
+            is_small = (
+                c.chunk_type == "paragraph"
+                and self._count_tokens(c.content) < self.min_tokens
+            )
+            if (
+                is_small
+                and merged
+                and merged[-1].chunk_type == "paragraph"
+                and merged[-1].section == c.section
+            ):
+                merged[-1] = Chunk(
+                    content=merged[-1].content + "\n" + c.content,
+                    section=merged[-1].section,
+                    chunk_type="paragraph",
+                    page_number=merged[-1].page_number,
+                )
+            else:
+                merged.append(c)
+
+        if (
+            len(merged) >= 2
+            and merged[0].chunk_type == "paragraph"
+            and self._count_tokens(merged[0].content) < self.min_tokens
+            and merged[1].chunk_type == "paragraph"
+            and merged[1].section == merged[0].section
+        ):
+            merged[1] = Chunk(
+                content=merged[0].content + "\n" + merged[1].content,
+                section=merged[1].section,
+                chunk_type="paragraph",
+                page_number=merged[1].page_number,
+            )
+            merged.pop(0)
+
+        return merged
 
     def _chunk_pdf(self, extracted: ExtractedText) -> Iterator[Chunk]:
         """Chunk PDF pages, attempting table detection per page."""

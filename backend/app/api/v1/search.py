@@ -202,6 +202,11 @@ _RELEVANCE_STOP = frozenset((
     "a", "an", "the", "and", "or", "of", "for", "to", "with", "by",
     "in", "at", "on", "it", "its", "you", "your", "me", "my", "we",
     "us", "our", "them", "their", "they", "is", "are", "was", "were",
+    # Auxiliary/modal verbs: grammatical scaffolding, not content — a query
+    # like "...verify I have a job" was scoring "have" as a term the answer
+    # had to contain, penalizing relevance for no reason.
+    "have", "has", "had", "do", "does", "did", "can", "could",
+    "will", "would", "should", "may", "might", "must", "i",
 ))
 
 
@@ -256,8 +261,17 @@ def _term_stem_candidates(term: str) -> set[str]:
 
 
 def _term_present(term: str, hay: str) -> bool:
-    """Presence of a query term (and its light stems) in the answer."""
-    return any(c in hay for c in _term_stem_candidates(term))
+    """Presence of a query term (and its light stems/synonyms) in the answer.
+
+    Stems catch morphological variants ("applicant"/"application"); domain
+    synonyms (domain_terms.RELEVANCE_SYNONYMS) catch semantically-identical
+    but lexically-unrelated pairs a stemmer can never bridge, like
+    "job"/"employment" or "verify"/"verification" -- without this, a
+    correctly-retrieved paraphrase gets scored as off-topic purely because
+    the answer uses different words for the same concept.
+    """
+    candidates = _term_stem_candidates(term) | domain_terms.relevance_synonyms_of(term)
+    return any(c in hay for c in candidates)
 
 
 def _relevance_factor(question: str, answer_text: str) -> float:
