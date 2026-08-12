@@ -22,6 +22,7 @@ import {
   listRecentChats,
   saveChat,
   deleteChat,
+  getChat,
   migrateLegacyChats,
   newChatId,
   deriveTitle,
@@ -119,9 +120,26 @@ export default function HomePage() {
   const messageIdRef = useRef(0);
   const submittingRef = useRef(false);
   const turnsRef = useRef<ChatTurn[]>([]);
+  const hasInitializedChatRef = useRef(false);
 
   const isCurrentResponse = (m: ChatMessage) =>
     m.from === "assistant" && m.id === latestResponseId;
+
+  const restoreChat = useCallback((chat: RecentChat) => {
+    turnsRef.current = [...chat.turns];
+    setCurrentChatId(chat.id);
+    const idRef = { current: 0 };
+    const msgs: ChatMessage[] = chat.turns.map((t) => {
+      const id = `r${++idRef.current}`;
+      if (t.role === "user") {
+        return { id, from: "user", query: t.content, timestamp: "" };
+      }
+      return { id, from: "assistant", text: t.content, timestamp: "" };
+    });
+    setMessages(msgs);
+    setActiveNav("chat");
+    setLatestResponseId(msgs.findLast((m) => m.from === "assistant")?.id ?? null);
+  }, []);
 
   const persistChat = useCallback(() => {
     if (!currentChatId) return;
@@ -187,11 +205,46 @@ export default function HomePage() {
     }
   }, [loadSettings]);
 
+  // Resume the chat named in the URL (?chat=<id>) on first load instead of
+  // always minting a new session. Without this, a plain page refresh loses
+  // the conversation boundary -- earlier turns stay saved under the old id,
+  // but every reload started a fresh id, fragmenting one continuous session
+  // into several sidebar entries. Guarded to run once: after it settles
+  // currentChatId, later renders must not re-read the URL and clobber
+  // whatever the user has navigated to since (new chat, a different recent
+  // chat, etc).
   useEffect(() => {
-    if (!currentChatId && activeNav === "chat") {
+    if (activeNav !== "chat" || hasInitializedChatRef.current) return;
+    hasInitializedChatRef.current = true;
+
+    const urlChatId =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("chat")
+        : null;
+    const existing = urlChatId ? getChat(urlChatId) : undefined;
+
+    if (existing) {
+      restoreChat(existing);
+    } else if (!currentChatId) {
       setCurrentChatId(newChatId());
     }
-  }, [activeNav, currentChatId]);
+  }, [activeNav, currentChatId, restoreChat]);
+
+  // Keep the URL's ?chat= param in sync with the active session (new chat,
+  // switching to a recent chat, deleting the active one) via replaceState --
+  // no extra browser-history entries, no navigation/reload, just makes the
+  // current session resumable if the page is refreshed or the URL is
+  // bookmarked/shared.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (currentChatId) {
+      url.searchParams.set("chat", currentChatId);
+    } else {
+      url.searchParams.delete("chat");
+    }
+    window.history.replaceState(null, "", url.toString());
+  }, [currentChatId]);
 
   const handleNewChat = useCallback(() => {
     turnsRef.current = [];
@@ -206,21 +259,12 @@ export default function HomePage() {
     setActiveNav("chat");
   }, []);
 
-  const handleSelectRecent = useCallback((chat: RecentChat) => {
-    turnsRef.current = [...chat.turns];
-    setCurrentChatId(chat.id);
-    const idRef = { current: 0 };
-    const msgs: ChatMessage[] = chat.turns.map((t) => {
-      const id = `r${++idRef.current}`;
-      if (t.role === "user") {
-        return { id, from: "user", query: t.content, timestamp: "" };
-      }
-      return { id, from: "assistant", text: t.content, timestamp: "" };
-    });
-    setMessages(msgs);
-    setActiveNav("chat");
-    setLatestResponseId(msgs.findLast((m) => m.from === "assistant")?.id ?? null);
-  }, []);
+  const handleSelectRecent = useCallback(
+    (chat: RecentChat) => {
+      restoreChat(chat);
+    },
+    [restoreChat],
+  );
 
   const handleRequestDeleteRecent = useCallback((chat: RecentChat) => {
     setChatToDelete(chat);
