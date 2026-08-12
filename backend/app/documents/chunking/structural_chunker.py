@@ -16,8 +16,9 @@ import re
 from dataclasses import dataclass
 from typing import Iterator
 
-from app.documents.chunking.table_chunker import chunk_table
 from app.documents.chunking.checklist_chunker import chunk_checklist
+from app.documents.chunking.recursive_chunker import recursive_chunk
+from app.documents.chunking.table_chunker import chunk_table
 from app.documents.text_extraction import ExtractedText
 
 
@@ -58,6 +59,14 @@ class StructuralChunker:
         possible so no content is dropped; a chunk with no eligible
         predecessor (e.g. the very first chunk in a section) merges
         forward into the next one instead.
+
+        A merge only happens if the *result* still fits within
+        max_tokens. Without that cap, a document split by
+        recursive_chunker into several chunks each just under max_tokens
+        (e.g. when min_tokens is close to max_tokens) would get every
+        one of those chunks immediately re-merged back into a single
+        oversized blob here, silently undoing the split that was just
+        enforced.
         """
         if not chunks:
             return chunks
@@ -68,9 +77,14 @@ class StructuralChunker:
                 c.chunk_type == "paragraph"
                 and self._count_tokens(c.content) < self.min_tokens
             )
+            fits = (
+                merged
+                and self._count_tokens(merged[-1].content + "\n" + c.content)
+                <= self.max_tokens
+            )
             if (
                 is_small
-                and merged
+                and fits
                 and merged[-1].chunk_type == "paragraph"
                 and merged[-1].section == c.section
             ):
@@ -89,6 +103,8 @@ class StructuralChunker:
             and self._count_tokens(merged[0].content) < self.min_tokens
             and merged[1].chunk_type == "paragraph"
             and merged[1].section == merged[0].section
+            and self._count_tokens(merged[0].content + "\n" + merged[1].content)
+            <= self.max_tokens
         ):
             merged[1] = Chunk(
                 content=merged[0].content + "\n" + merged[1].content,
@@ -280,7 +296,18 @@ class StructuralChunker:
         section: str | None = None,
         page_num: int | None = None,
     ) -> Iterator[Chunk]:
-        """Split a text block into chunks of reasonable size."""
+        """Split a text block into chunks of reasonable size.
+
+        Delegates the oversized case to recursive_chunker.recursive_chunk(),
+        which splits on sentence boundaries first and falls back to clause
+        boundaries (commas/semicolons) for any single sentence that alone
+        still exceeds max_tokens -- long run-on sentences are common in
+        compliance/policy text. This module used to duplicate a weaker,
+        sentence-only version of this logic inline with no clause-level
+        fallback, while recursive_chunker.py sat unused (see AUDIT.md
+        §"Missing Chunker Submodules" / build-plan item 2.4 -- it was
+        built per the original design but never wired in).
+        """
         if self._count_tokens(block) <= self.max_tokens:
             yield Chunk(
                 content=block,
@@ -290,27 +317,14 @@ class StructuralChunker:
             )
             return
 
-        # Split on sentence boundaries
-        sentences = re.split(r'(?<=[.!?])\s+', block)
-        current: list[str] = []
-
-        for sent in sentences:
-            current.append(sent)
-            if self._count_tokens("\n".join(current)) >= self.max_tokens:
-                yield Chunk(
-                    content="\n".join(current),
-                    section=section,
-                    chunk_type="paragraph",
-                    page_number=page_num,
-                )
-                current = []
-
-        if current:
+        for rc in recursive_chunk(
+            block, max_tokens=self.max_tokens, section=section, page_number=page_num
+        ):
             yield Chunk(
-                content="\n".join(current),
-                section=section,
-                chunk_type="paragraph",
-                page_number=page_num,
+                content=rc.content,
+                section=rc.section,
+                chunk_type=rc.chunk_type,
+                page_number=rc.page_number,
             )
 
     def _is_table_block(self, text: str) -> bool:
