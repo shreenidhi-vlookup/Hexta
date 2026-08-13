@@ -195,100 +195,18 @@ def _dampen_generic_confidence(
 
 # --- Phase B: query↔answer relevance gate -------------------------------
 
-# Minimal stopwords dropped from a query when computing relevance. Kept
-# intentionally small so meaningful domain words ("employment", "income",
-# "loan", "credit", "jumbo") are preserved for overlap with the answer.
-_RELEVANCE_STOP = frozenset((
-    "a", "an", "the", "and", "or", "of", "for", "to", "with", "by",
-    "in", "at", "on", "it", "its", "you", "your", "me", "my", "we",
-    "us", "our", "them", "their", "they", "is", "are", "was", "were",
-    # Auxiliary/modal verbs: grammatical scaffolding, not content — a query
-    # like "...verify I have a job" was scoring "have" as a term the answer
-    # had to contain, penalizing relevance for no reason.
-    "have", "has", "had", "do", "does", "did", "can", "could",
-    "will", "would", "should", "may", "might", "must", "i",
-))
-
-
-def _query_content_terms(question: str) -> set[str]:
-    """Significant content tokens in a question (drop starters + stopwords).
-
-    Domain abbreviations are expanded to their canonical words so a query
-    term like "dti" also matches an answer that spells out "debt-to-income".
-    """
-    toks = re.split(r"[^a-z']+", (question or "").lower())
-    terms: set[str] = set()
-    for t in toks:
-        if len(t) < 3 or t in domain_terms.QUESTION_STARTERS or t in _RELEVANCE_STOP:
-            continue
-        terms.add(t)
-        canon = domain_terms.canonical_of(t)
-        if canon != t:
-            terms.update(
-                w for w in canon.split()
-                if len(w) >= 3 and w not in _RELEVANCE_STOP
-            )
-    return terms
-
-
-def _term_stem_candidates(term: str) -> set[str]:
-    """Light derivational-suffix variants of a term for matching.
-
-    Lets morphological variants of the same root match the answer text
-    ("applicant" ↔ "applications", "payment" ↔ "payments") without a full
-    stemmer. Falls back to the bare term when it cannot strip a suffix.
-    """
-    candidates: set[str] = {term}
-    if len(term) <= 3:
-        return candidates
-    for suffix, extra in (
-        ("ies", ("y",)),
-        ("tion", ("", "e")),
-        ("ment", ("",)),
-        ("ant", ("", "at")),
-        ("ent", ("", "et")),
-        ("es", ("",)),
-        ("ing", ("", "e")),
-        ("ed", ("", "e")),
-        ("er", ("",)),
-        ("or", ("",)),
-        ("s", ("",)),
-    ):
-        if term.endswith(suffix) and len(term) > len(suffix) + 2:
-            root = term[: -len(suffix)]
-            candidates.update(root + e for e in extra)
-    return candidates
-
-
-def _term_present(term: str, hay: str) -> bool:
-    """Presence of a query term (and its light stems/synonyms) in the answer.
-
-    Stems catch morphological variants ("applicant"/"application"); domain
-    synonyms (domain_terms.RELEVANCE_SYNONYMS) catch semantically-identical
-    but lexically-unrelated pairs a stemmer can never bridge, like
-    "job"/"employment" or "verify"/"verification" -- without this, a
-    correctly-retrieved paraphrase gets scored as off-topic purely because
-    the answer uses different words for the same concept.
-    """
-    candidates = _term_stem_candidates(term) | domain_terms.relevance_synonyms_of(term)
-    return any(c in hay for c in candidates)
-
-
-def _relevance_factor(question: str, answer_text: str) -> float:
-    """Fraction of the query's content terms present in the answer, in [0,1].
-
-    1.0 means every significant query term appears in the answer (clearly
-    on-topic). 0.0 means none do (off-topic retrieval — the RRF score was
-    inflated by common words or a wrong domain subtopic).
-    """
-    terms = _query_content_terms(question)
-    if not terms:
-        return 1.0
-    hay = (answer_text or "").lower()
-    if not hay:
-        return 0.0
-    matched = sum(1 for t in terms if _term_present(t, hay))
-    return matched / len(terms)
+# Moved to query_processing/relevance.py so response/package_builder.py can
+# use the same scoring for answer-phrase selection without a circular
+# import (search.py already imports build_response_package from
+# package_builder.py). Re-exported here under the original underscore
+# names so existing callers/tests (test_search_dampening.py) are unaffected.
+from app.query_processing.relevance import (  # noqa: E402
+    _RELEVANCE_STOP,
+    query_content_terms as _query_content_terms,
+    relevance_factor as _relevance_factor,
+    term_present as _term_present,
+    term_stem_candidates as _term_stem_candidates,
+)
 
 
 def _recalibrate_confidence(confidence: float, relevance: float) -> float:

@@ -68,6 +68,110 @@ class TestPackageBuilder:
         assert package.response_id  # non-empty
         assert package.confidence > 0
 
+    def test_answer_phrase_prefers_specific_over_generic_excerpt(self):
+        """Regression: answer_phrase used to always come from the #1-ranked
+        excerpt, even when a lower-ranked excerpt actually held the
+        specific thing being asked about. A query for "0% down payment"
+        used to lead with a generic framing sentence ("...varies based on
+        down payment amount...") while the excerpt with the real number
+        ("0% down: 2.15%") sat unused right below it. Now picks whichever
+        clean-starting excerpt is most relevant to the query."""
+        candidates = [
+            RankedCandidate(
+                chunk_id=1,
+                content=(
+                    "The VA funding fee varies based on down payment amount, "
+                    "whether the loan is a first or subsequent use of VA "
+                    "benefits, and whether the borrower is a veteran."
+                ),
+                document_id=1, title="VA Guide", section=None, chunk_type="paragraph",
+                department="general", bm25_score=0.9, vec_score=0.9,
+                rrf_score=0.06, combined_rank=1,
+                is_approved=True, document_version=1,
+            ),
+            RankedCandidate(
+                chunk_id=2,
+                content="0% down payment: 2.15% funding fee on first use.",
+                document_id=1, title="VA Guide", section=None, chunk_type="paragraph",
+                department="general", bm25_score=0.5, vec_score=0.7,
+                rrf_score=0.04, combined_rank=2,
+                is_approved=True, document_version=1,
+            ),
+        ]
+        package = build_response_package(
+            candidates=candidates,
+            query_text="what is the VA funding fee with 0% down payment on first use",
+        )
+        assert "2.15%" in package.answer_phrase
+
+    def test_answer_phrase_ties_keep_rank_order(self):
+        """When relevance doesn't differentiate between excerpts (the
+        common case), phrase selection must still default to the
+        top-ranked excerpt -- this change should only matter when
+        relevance actually varies."""
+        candidates = [
+            RankedCandidate(
+                chunk_id=1, content="The minimum credit score is 620.",
+                document_id=1, title="Credit", section=None, chunk_type="paragraph",
+                department="general", bm25_score=0.8, vec_score=0.9,
+                rrf_score=0.05, combined_rank=1,
+                is_approved=True, document_version=1,
+            ),
+            RankedCandidate(
+                chunk_id=2, content="The maximum LTV is 80%.",
+                document_id=2, title="LTV", section=None, chunk_type="paragraph",
+                department="general", bm25_score=0.5, vec_score=0.6,
+                rrf_score=0.03, combined_rank=2,
+                is_approved=True, document_version=1,
+            ),
+        ]
+        package = build_response_package(
+            candidates=candidates,
+            query_text="tell me about mortgages",
+        )
+        assert package.answer_phrase == "The minimum credit score is 620."
+
+    def test_answer_phrase_prefers_complete_item_over_teaser_on_tie(self):
+        """Regression: a checklist item that carries its parent sentence as
+        context (checklist_chunker.py) has the same relevance as that
+        parent excerpt on its own, since the item's text is literally
+        "preamble + bullet". Rank order alone would then pick the bare
+        preamble -- a teaser ending in ":" that promises a list without
+        delivering one ("...following categories:") -- over the excerpt
+        one rank down that actually has an item from that list."""
+        candidates = [
+            RankedCandidate(
+                chunk_id=1,
+                content=(
+                    "Eligibility for a VA-backed loan depends on military "
+                    "service history, and applicants generally fall into "
+                    "one of the following categories:"
+                ),
+                document_id=1, title="VA Guide", section=None, chunk_type="paragraph",
+                department="general", bm25_score=1.0, vec_score=0.86,
+                rrf_score=0.06, combined_rank=1,
+                is_approved=True, document_version=1,
+            ),
+            RankedCandidate(
+                chunk_id=2,
+                content=(
+                    "Eligibility for a VA-backed loan depends on military "
+                    "service history, and applicants generally fall into "
+                    "one of the following categories: Veterans who served "
+                    "the minimum active-duty service requirement."
+                ),
+                document_id=1, title="VA Guide", section=None, chunk_type="checklist",
+                department="general", bm25_score=0.9, vec_score=0.71,
+                rrf_score=0.05, combined_rank=2,
+                is_approved=True, document_version=1,
+            ),
+        ]
+        package = build_response_package(
+            candidates=candidates,
+            query_text="who is eligible for a VA loan",
+        )
+        assert "Veterans who served" in package.answer_phrase
+
     def test_table_excerpt_gets_verbatim_answer_phrase(self):
         """Regression: a table excerpt used to always get answer_phrase ""
         (its short rows have no terminal punctuation, so
@@ -264,6 +368,49 @@ class TestCleanExcerptSelection:
             query_text="credit score",
         )
         assert package.answer_phrase == ""
+
+    def test_heading_only_top_falls_through_to_next_excerpt(self):
+        """Regression: a bare section heading with no body can rank #1 --
+        it repeats the query's own words -- and used to make the whole
+        response come back with answer_phrase="" even when a lower-ranked
+        excerpt had a real, complete answer. Live-verified: "what is a
+        manufactured home" hit exactly this, top excerpt "Manufactured
+        Home Additional Requirements" (99.2% confidence, just a heading),
+        second excerpt the actual definition (98.4%) -- surfaced "No
+        answer found" despite the definition sitting right there."""
+        package = build_response_package(
+            candidates=[
+                self._candidate(1, "Manufactured Home Additional Requirements"),
+                self._candidate(
+                    2,
+                    "Manufactured homes must be titled as real property and "
+                    "permanently affixed to an approved foundation.",
+                ),
+            ],
+            query_text="what is a manufactured home",
+        )
+        assert package.answer_phrase.startswith("Manufactured homes must")
+
+    def test_checklist_item_without_punctuation_gets_verbatim_phrase(self):
+        """Regression: checklist items rarely end in a period ("- Two-to-
+        four unit properties when the borrower occupies one unit"), so
+        _extract_answer_phrase's heading check ("no terminal punctuation
+        + short") misclassified them as headings too, the same failure
+        mode as tables. Verified live at 99.2% confidence surfacing "No
+        answer found". Checklist items are now handled like tables:
+        verbatim text, no prose sentence-extraction."""
+        candidate = RankedCandidate(
+            chunk_id=1,
+            content="- Two-to-four unit properties when the borrower occupies one unit",
+            document_id=1, title="Doc", section=None, chunk_type="checklist",
+            department="general", bm25_score=0.9, vec_score=0.9,
+            rrf_score=0.3, combined_rank=1, is_approved=True, document_version=1,
+        )
+        package = build_response_package(
+            candidates=[candidate],
+            query_text="can a two to four unit property be financed",
+        )
+        assert package.answer_phrase == "- Two-to-four unit properties when the borrower occupies one unit"
 
 
 class TestTruncate:
