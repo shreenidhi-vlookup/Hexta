@@ -134,6 +134,14 @@ export default function HomePage() {
       if (t.role === "user") {
         return { id, from: "user", query: t.content, timestamp: "" };
       }
+      // Turns saved before this fix (or canned greeting replies) have no
+      // `response`, so they still fall back to plain text. Turns with a
+      // saved response go through the same ResponsePackageCard path as a
+      // live answer, so a restored no_answer still renders as "No answer
+      // found" instead of leaking its best-guess answer_phrase.
+      if (t.response) {
+        return { id, from: "assistant", response: t.response, timestamp: "" };
+      }
       return { id, from: "assistant", text: t.content, timestamp: "" };
     });
     setMessages(msgs);
@@ -423,6 +431,11 @@ export default function HomePage() {
       appendTurn({
         role: "assistant",
         content: result.answer_phrase || result.title,
+        // Persist the full response so restoring this chat (refresh, chat
+        // switch) re-renders through the same routing-aware card instead
+        // of showing the raw answer_phrase as if it were always a valid
+        // answer -- see ChatTurn.response for why this matters.
+        response: result,
       });
       let currentTitle = "";
       const titleChars = result.title.split("");

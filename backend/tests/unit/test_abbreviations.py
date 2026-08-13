@@ -31,3 +31,30 @@ class TestHarvestAbbreviations:
         )
         assert ("sar", "subject access request") in pairs
         assert ("ltv", "loan to value") in pairs
+
+
+class TestAcronymInitialsGate:
+    """Regression: the "Full Term (ACR)" pattern captures up to ten
+    preceding title-case words, which over-captures on headings. The
+    document title "Down Payment and Loan-to-Value (LTV) Requirements"
+    stored LTV -> "down payment and loan-to-value"; every later query
+    mentioning LTV then had that whole phrase appended to its search
+    text, pulling retrieval toward that one document and injecting an
+    unrelated concept ("down payment"). Expansions must be
+    initial-consistent with their acronym."""
+
+    def test_heading_is_trimmed_to_the_matching_span(self):
+        pairs = harvest_abbreviations(
+            "Down Payment and Loan-to-Value (LTV) Requirements"
+        )
+        assert ("ltv", "loan-to-value") in pairs
+        assert not any(c.startswith("down payment") for _, c in pairs)
+
+    def test_hyphenated_words_contribute_each_initial(self):
+        pairs = harvest_abbreviations("Combined Loan-to-Value (CLTV) limits apply.")
+        assert ("cltv", "combined loan-to-value") in pairs
+
+    def test_non_initial_expansion_is_rejected(self):
+        # Nothing in "Annual Review Board" spells GDPR, so storing it would
+        # corrupt every query containing that acronym.
+        assert harvest_abbreviations("Annual Review Board (GDPR) applies.") == []

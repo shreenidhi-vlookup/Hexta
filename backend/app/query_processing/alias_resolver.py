@@ -19,6 +19,12 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _WORD_RE = re.compile(r"[a-z]+[0-9]*")
+_DEDUPE_NON_WORD_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_for_dedupe(text: str) -> str:
+    """Lowercase, punctuation-flattened form for "already present?" checks."""
+    return f" {_DEDUPE_NON_WORD_RE.sub(' ', (text or '').lower()).strip()} "
 
 
 def resolve_doc_aliases(conn, text: str) -> list[str]:
@@ -53,7 +59,25 @@ def resolve_doc_aliases(conn, text: str) -> list[str]:
 
     canonicals = [row["canonical"] for row in rows if row and row.get("canonical")]
     out: list[str] = []
+    haystack = _normalize_for_dedupe(text)
     for canonical in canonicals:
-        if canonical and canonical not in text and canonical not in out:
-            out.append(canonical)
+        if not canonical:
+            continue
+        normalized = _normalize_for_dedupe(canonical)
+        # Compare on a punctuation-flattened form so hyphen/space variants
+        # of the same phrase count as already present. A plain substring
+        # test misses them: query_expansion already puts "loan to value"
+        # into the search text, and appending the doc alias
+        # "loan-to-value" on top of it repeated that one concept three
+        # times over (LTV + both spellings), over-weighting it in BM25 and
+        # in the embedding. Verified live: it pushed every chunk that
+        # merely *discusses* loan-to-value above the table holding the
+        # answer, so "What is the maximum LTV for an investment property?"
+        # returned the combined-LTV paragraph and the table with the 85%
+        # row fell to rank four, outside the excerpts.
+        if normalized and normalized in haystack:
+            continue
+        if any(normalized == _normalize_for_dedupe(o) for o in out):
+            continue
+        out.append(canonical)
     return out
