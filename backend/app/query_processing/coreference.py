@@ -57,7 +57,18 @@ def _subject_of(question: str) -> str | None:
     sq = plan.sub_queries[0]
     canonicals = ent.unique_canonicals(sq.entities)
     if canonicals:
-        return " ".join(canonicals[:2])
+        # Only the single most prominent entity -- joining two canonicals
+        # ("veterans affairs down payment") produces an incoherent subject
+        # when the previous question named multiple entities, which then
+        # gets prepended onto the *next* question. Verified live: this
+        # broke a perfectly answerable follow-up ("What are the
+        # eligibility requirements?") down to a no_answer (confidence
+        # dropped from 72.6 to 54.0) purely because the prior turn
+        # ("...VA funding fee with 0% down payment...") had two entities
+        # instead of one. A single clean entity is neutral-to-helpful
+        # (confidence went slightly *up*, to 74.3, in the same case);
+        # a two-entity mashup is actively harmful.
+        return canonicals[0]
     tokens = [t for t in sq.text.split() if t not in _STOP]
     if tokens:
         return " ".join(tokens[:4])
