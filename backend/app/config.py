@@ -72,9 +72,26 @@ class Settings(BaseSettings):
     auto_create_schema: bool = True
     audit_enabled: bool = True
 
-    # --- Optional reranker (P2; OFF by default on the micro tier) ---
-    rerank_enabled: bool = False
-    rerank_model_dir: str = "nlp_models/reranker"
+    # --- Cross-encoder reranker ---
+    # Reorders the top rerank_top_k RRF candidates by scoring each
+    # (query, chunk) pair together -- the signal neither BM25 nor the
+    # bi-encoder can produce, since both score query and chunk apart.
+    # Enabled by default now that it runs on the FastEmbed/onnxruntime
+    # stack already in the image (~80MB quantized) instead of
+    # transformers/torch, which never fit the memory cap. Set
+    # HEXA_RERANK_ENABLED=false to fall back to plain RRF order.
+    # Any change here must be checked against the <200ms p95 budget
+    # (CLAUDE.md rule 6) via evaluation/run_benchmark.py.
+    #
+    # rerank_top_k is set by that budget, not by taste: cross-encoder
+    # cost is linear in candidates, and on the eval set p95 measured
+    # 179.8ms at 5, 208.7ms at 6 and 244.5ms at 10. Rank quality is flat
+    # from 5 upward (hit_rate@3 92.3% and mrr@3 62.8% at all three), so 5
+    # buys the whole improvement and is the only one inside budget.
+    rerank_enabled: bool = True
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    rerank_cache_dir: str = "nlp_models/reranker"
+    rerank_top_k: int = 5
 
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> "Settings":

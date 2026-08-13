@@ -42,7 +42,9 @@ def _try_retrieval_phase(dataset: list[dict]) -> tuple[dict, bool]:
     """
     try:
         from app.db.postgres.session import acquire
-        from app.search.hybrid_orchestrator import search_knowledge_base
+        from app.api.v1.search import _rank_sub_query
+        from app.config import settings
+        from app.ranking.reranker import rerank
         from evaluation.datasets.seed_benchmark_data import seed_benchmark_data, clear_benchmark_data
     except (ImportError, Exception):
         return {}, False
@@ -73,13 +75,31 @@ def _try_retrieval_phase(dataset: list[dict]) -> tuple[dict, bool]:
             try:
                 start = time.perf_counter()
                 with acquire() as conn:
-                    result = search_knowledge_base(
-                        conn=conn,
-                        sub_queries=[item["question"]],
-                        user=user,
-                    )
+                    # Mirror the production ranking path, not just the raw
+                    # candidate fetch. This used to call
+                    # search_knowledge_base() directly, which skips both RRF
+                    # fusion and the reranker -- so every rank-sensitive
+                    # metric here (hit_rate@1, MRR, nDCG) described an
+                    # ordering no user ever sees, and no ranking change
+                    # could be measured by the benchmark meant to gate it
+                    # (CLAUDE.md rule 7).
+                    ranked = _rank_sub_query(conn, item["question"], user)
+                    if settings.rerank_enabled and ranked:
+                        candidates = [
+                            {"chunk_id": c.chunk_id, "content": c.content}
+                            for c in ranked[: settings.bm25_limit]
+                        ]
+                        reranked = rerank(
+                            query=item["question"],
+                            candidates=candidates,
+                            top_k=min(settings.rerank_top_k, len(candidates)),
+                        )
+                        order = {c["chunk_id"]: i for i, c in enumerate(reranked)}
+                        ranked.sort(
+                            key=lambda c: order.get(c.chunk_id, len(order))
+                        )
                     e2e_latencies.append((time.perf_counter() - start) * 1000)
-                retrieved_ids = [c.chunk_id for c in result.candidates]
+                retrieved_ids = [c.chunk_id for c in ranked]
             except Exception:
                 retrieved_ids = []
 

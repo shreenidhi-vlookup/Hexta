@@ -310,10 +310,15 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
             {"chunk_id": c.chunk_id, "content": c.content}
             for c in ranked[: settings.bm25_limit]
         ]
+        # Only the head of the candidate list is rescored -- cross-encoder
+        # cost is linear in candidates and the whole point is to fit the
+        # <200ms p95 budget (CLAUDE.md rule 6). Candidates past
+        # rerank_top_k keep their RRF order: they all map to the same
+        # sort key below, and Python's stable sort preserves it.
         rerank_result = rerank(
             query=question,
             candidates=rerank_candidates,
-            top_k=min(10, len(rerank_candidates)),
+            top_k=min(settings.rerank_top_k, len(rerank_candidates)),
         )
         rerank_order = {c["chunk_id"]: i for i, c in enumerate(rerank_result)}
         ranked.sort(key=lambda c: rerank_order.get(c.chunk_id, len(rerank_order)))
