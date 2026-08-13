@@ -13,6 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from app.config import settings
+from app.query_processing.relevance import relevance_factor
 from app.ranking.rrf import RRF_K, RankedCandidate
 
 
@@ -250,33 +251,93 @@ def build_response_package(
     # Confidence from the top candidate
     top_confidence = excerpts[0].confidence if excerpts else 0.0
 
-    # Answer phrase from the first cleanly-starting excerpt (single traced
-    # sentence). A chunk that opens mid-word is skipped so the answer never
-    # starts with a fragment like "l mortgages..." or "ents.".
-    phrase_excerpt = next(
-        (e for e in excerpts if _starts_cleanly(e.text)),
-        excerpts[0] if excerpts else None,
-    )
-    if phrase_excerpt is None:
-        answer_phrase = ""
-    elif phrase_excerpt.source.chunk_type == "table":
-        # _extract_answer_phrase is prose-oriented: it looks for a
-        # sentence ending in terminal punctuation. A table's rows are
-        # short, substantive fragments with no such punctuation -- every
-        # row gets classified as "just a heading" and skipped, so this
-        # always returned "" for a table excerpt. An empty answer_phrase
-        # makes search.py's _decide_routing() force no_answer regardless
-        # of confidence, silently discarding a correctly-retrieved,
-        # high-confidence table (verified live: a query whose best match
-        # was an LTV-limits table scored 98.4% confidence and still
-        # surfaced "No answer found"). Tables are already a complete,
-        # atomic unit of evidence (table_chunker.py never splits one
-        # mid-row) -- the table's own truncated verbatim text stands in
-        # as the phrase directly. No synthesis, just the same length cap
-        # _extract_answer_phrase already applies to prose.
-        answer_phrase = _truncate(phrase_excerpt.text, 200)
+    # Answer phrase from the most relevant cleanly-starting excerpt (single
+    # traced sentence). A chunk that opens mid-word is skipped so the
+    # answer never starts with a fragment like "l mortgages..." or "ents.".
+    #
+    # "Most relevant to query_text", not just "top-ranked by RRF" -- the
+    # #1 candidate by vector/BM25 score is often a generic framing sentence
+    # ("The VA funding fee varies based on down payment amount...") while a
+    # lower-ranked excerpt holds the actual specific answer (a table row:
+    # "0% down  2.15%"). Plain word-overlap relevance alone isn't enough to
+    # prefer the specific one, though -- a framing sentence that happens to
+    # repeat the same domain words ("VA", "funding fee", "down payment")
+    # can score just as relevant, or higher, than the terse specific
+    # answer. When the query itself is asking about a figure (contains a
+    # digit -- "0% down payment", "$500", "30 days"), an excerpt that
+    # actually contains a number is preferred outright over one that
+    # doesn't, before relevance breaks any remaining tie: a query asking
+    # for a specific number should lead with a number, not general
+    # information, whenever the retrieved evidence has one to offer.
+    # A relevance tie is common when a checklist item carries its parent
+    # sentence as context (see checklist_chunker.py) -- the item and its
+    # own preamble excerpt then share identical relevance, since the
+    # item's text is "preamble + bullet". Left alone, rank order would
+    # pick the *preamble itself*: a teaser sentence ending in ":"
+    # ("...following categories:") that promises a list without ever
+    # delivering it, when the excerpt one rank down is the same teaser
+    # *plus* an actual item from that list. So among excerpts tied on the
+    # signals above, one that doesn't trail off with a colon wins --
+    # relevance is rounded first so near-equal floats count as tied
+    # rather than one deciding the whole comparison by a fraction.
+    #
+    # Ties on all signals (the common case) fall back to rank order via
+    # max()'s stable first-match behavior, so unaffected queries -- most
+    # of them -- see no change at all.
+    clean_excerpts = [e for e in excerpts if _starts_cleanly(e.text)]
+    query_wants_number = bool(re.search(r"\d", query_text or ""))
+
+    def _phrase_rank(e: Excerpt) -> tuple:
+        rel = round(relevance_factor(query_text, e.text), 2)
+        not_teaser = not e.text.rstrip().endswith(":")
+        if query_wants_number:
+            return (bool(re.search(r"\d", e.text)), rel, not_teaser)
+        return (rel, not_teaser)
+
+    def _phrase_from(e: Excerpt) -> str:
+        if e.source.chunk_type in ("table", "checklist"):
+            # _extract_answer_phrase is prose-oriented: it looks for a
+            # sentence ending in terminal punctuation. Table rows and
+            # checklist items are both short, substantive fragments with
+            # no such punctuation -- every row/item got classified as
+            # "just a heading" and skipped, so this always returned ""
+            # for them. An empty answer_phrase makes search.py's
+            # _decide_routing() force no_answer regardless of confidence,
+            # silently discarding correctly-retrieved, high-confidence
+            # evidence (verified live for both: an LTV table at 98.4%
+            # confidence and a "two-to-four unit" checklist item at 99.2%
+            # both surfaced "No answer found"). Both are already complete,
+            # atomic units of evidence on their own -- their own truncated
+            # verbatim text stands in as the phrase directly. No
+            # synthesis, just the same length cap applied to prose.
+            return _truncate(e.text, 200)
+        return _extract_answer_phrase(e.text)
+
+    # Excerpts are tried in _phrase_rank order (best first), falling
+    # through to the next one whenever a candidate can't produce a phrase
+    # at all -- not just when it isn't the top choice. A chunk can be a
+    # bare section heading with no body ("Manufactured Home Additional
+    # Requirements", "Rescission Period") that ranks #1 on relevance
+    # (it repeats the query's own words) but is correctly recognized as
+    # "just a heading" and yields "". The old code committed to whichever
+    # excerpt _phrase_rank preferred and gave up if that one came back
+    # empty, discarding two more excerpts sitting right below it that
+    # would have worked fine (verified live: both cases had a 97%+
+    # confidence excerpt one or two ranks down with real answer content).
+    answer_phrase = ""
+    for candidate in sorted(clean_excerpts, key=_phrase_rank, reverse=True):
+        answer_phrase = _phrase_from(candidate)
+        if answer_phrase:
+            break
     else:
-        answer_phrase = _extract_answer_phrase(phrase_excerpt.text)
+        # Nothing usable came from any clean-starting excerpt (including
+        # when there were none at all -- every excerpt opened mid-word).
+        # Fall back to the top-ranked excerpt regardless, same as before
+        # this whole selection logic existed: a mid-word-opening excerpt
+        # is still better than surfacing no answer at all when it's all
+        # there is.
+        if excerpts:
+            answer_phrase = _phrase_from(excerpts[0])
 
     # Generate response_id for audit tracing
     response_id = hashlib.sha256(
