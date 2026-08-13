@@ -63,6 +63,30 @@ class TestBareFollowup:
         )
 
 
+class TestMultiEntityPreviousTurn:
+    """Regression coverage: when the previous turn named two entities, the
+    subject used to be both canonicals joined ("veterans affairs down
+    payment"), an incoherent mashup that -- prepended onto the *next*
+    question -- verifiably broke retrieval (confidence dropped from 72.6%
+    to 54.0%, flipping routing from "partial" to "no_answer" for
+    "What are the eligibility requirements?"). Only the single most
+    prominent entity is used now."""
+
+    HISTORY_TWO_ENTITIES = [
+        {
+            "question": "what is the VA funding fee with 0% down payment on first use",
+            "answer": None,
+        }
+    ]
+
+    def test_only_first_entity_used_as_subject(self):
+        resolved = resolve_references(
+            "What are the eligibility requirements?", self.HISTORY_TWO_ENTITIES
+        )
+        assert resolved == "veterans affairs What are the eligibility requirements?"
+        assert "down payment" not in resolved
+
+
 class TestReferentialPhrase:
     def test_the_above(self):
         resolved = resolve_references("What about the above?", HISTORY_LTM)
