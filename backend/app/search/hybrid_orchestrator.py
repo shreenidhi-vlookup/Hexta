@@ -16,6 +16,7 @@ from typing import Sequence
 
 from psycopg import Connection
 
+from app.ranking.rrf import RRF_K
 from app.ranking.weights_config import DEFAULT_WEIGHTS
 from app.search.bm25_search import build_tsquery
 from app.search.metadata_filters import get_search_filter
@@ -103,29 +104,69 @@ def search_knowledge_base(
 
     where_clause = " AND ".join(where_parts)
 
+    # Combine BM25 and vector scores by RANK (Reciprocal Rank Fusion), not
+    # by their raw values. The two scores live on different, incompatible
+    # scales: ts_rank_cd is unbounded and commonly lands well above 1.0 for
+    # a chunk with several term hits, while cosine similarity is bounded to
+    # roughly [0, 1] (see ranking/weights_config.py's calibration notes).
+    # The previous ORDER BY combined them directly as
+    # `bm25_score * 0.3 + vec_score * 0.7`, so a chunk with a merely
+    # decent BM25 score (say 1.3, from several generic recurring words
+    # like "loan") could numerically swamp a chunk with a much better,
+    # well-calibrated vector match (0.76 vs 0.69) despite BM25 supposedly
+    # being the minority signal at 30% weight -- 0.3 of an unbounded
+    # number isn't actually 30% of the combined score once the other term
+    # is capped near 1. Verified live: for "What is the minimum down
+    # payment for a VA loan?", the one chunk that actually answers it
+    # (a table row) ranked #2 on vector similarity (0.76) but #9 on raw
+    # BM25 score, and lost to an unrelated FHA chunk (BM25 1.3, vector
+    # 0.69: 1.3*0.3 + 0.69*0.7 = 0.87 vs the right chunk's
+    # 0.4*0.3 + 0.76*0.7 = 0.65). Ranking each list first and fusing by
+    # 1/(k+rank) -- the same RRF_K-based formula ranking/rrf.py already
+    # implements but was never wired into this query -- makes the two
+    # signals commensurable regardless of either score's raw magnitude,
+    # so the properly-weighted 70% vector preference actually applies.
+    # Still a single SQL statement (CLAUDE.md rule #3): both rankings are
+    # computed as window functions over the same filtered candidate set.
     query = f"""
-    SELECT c.id, c.document_id, d.title, d.doc_type, c.section,
-           c.chunk_type, c.content, c.department,
-           c.is_approved AS chunk_is_approved,
-           d.client_id, d.version AS document_version,
-           ts_rank_cd(c.fts, to_tsquery('english', %s)) AS bm25_score,
-           1 - (c.embedding <=> %s) AS vec_score
-    FROM document_chunks c
-    JOIN documents d ON d.id = c.document_id
-    WHERE {where_clause}
-    ORDER BY (
-        ts_rank_cd(c.fts, to_tsquery('english', %s)) * 0.3 +
-        (1 - (c.embedding <=> %s)) * 0.7
-    ) DESC
+    WITH scored AS (
+        SELECT c.id, c.document_id, d.title, d.doc_type, c.section,
+               c.chunk_type, c.content, c.department,
+               c.is_approved AS chunk_is_approved,
+               d.client_id, d.version AS document_version,
+               ts_rank_cd(c.fts, to_tsquery('english', %s)) AS bm25_score,
+               1 - (c.embedding <=> %s) AS vec_score,
+               RANK() OVER (
+                   ORDER BY ts_rank_cd(c.fts, to_tsquery('english', %s)) DESC
+               ) AS bm25_rank,
+               RANK() OVER (
+                   ORDER BY (1 - (c.embedding <=> %s)) DESC
+               ) AS vec_rank
+        FROM document_chunks c
+        JOIN documents d ON d.id = c.document_id
+        WHERE {where_clause}
+    )
+    SELECT id, document_id, title, doc_type, section, chunk_type, content,
+           department, chunk_is_approved, client_id, document_version,
+           bm25_score, vec_score,
+           (%s / (%s + bm25_rank)::float) + (%s / (%s + vec_rank)::float) AS rrf_score
+    FROM scored
+    ORDER BY rrf_score DESC
     LIMIT %s
     """
 
     params: list = [
         tsquery,
         query_vector,
+        tsquery,
+        query_vector,
     ]
     params.extend(where_params)
-    params.extend([tsquery, query_vector, max_results])
+    params.extend([
+        DEFAULT_WEIGHTS.bm25_weight, RRF_K,
+        DEFAULT_WEIGHTS.vector_weight, RRF_K,
+        max_results,
+    ])
 
     with conn.cursor() as cur:
         cur.execute(query, params)
