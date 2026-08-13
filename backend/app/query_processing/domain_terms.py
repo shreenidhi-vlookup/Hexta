@@ -216,6 +216,14 @@ COMMON_WORDS: set[str] = {
      # with an FHA loan?" was silently rewritten to "...occupancy a home
      # finance with an FHA loan", which no longer matched its own answer.
      "occupy", "occupied", "occupies", "occupancy", "occupying",
+     # "application" (fuzz.ratio against "applicant" cleared threshold) and
+     # "status" (fuzz.ratio against "states", pulled into the vocabulary
+     # from "united states department of agriculture") were each silently
+     # rewritten mid-query, which broke scope_guard.py's out-of-scope
+     # detection for personal-data questions: "What is the status of my
+     # loan application?" became "...the states of my loan applicant",
+     # no longer matching the "status of my" pattern at all.
+     "application", "applications", "status", "statuses",
 }
 
 # Phrases that indicate a new question when they start a fragment.
