@@ -35,6 +35,19 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
     never as ``"checklist"`` — it isn't a list item and mislabeling it hid
     it from downstream merge/size logic that treats "checklist" chunks as
     already-final.
+
+    Each checklist item's content is prefixed with that preamble (still
+    fully verbatim — concatenating two pieces of source text, not
+    synthesizing new ones). Without it, splitting "Eligibility for a VA
+    loan depends on...following categories:\n- Veterans who served..."
+    into separate chunks strips each bullet of every word ("VA",
+    "eligible", "loan") a query would actually search on -- a bullet
+    like "- Veterans who served the minimum active-duty service
+    requirement..." has zero lexical overlap with "who is eligible for
+    a VA loan" on its own, so it was consistently outranked by unrelated
+    paragraphs that happened to repeat "VA loan" a few times, and never
+    made it into the response at all despite being exactly the right
+    answer.
     """
     lines = text.split("\n")
     if not any(_is_list_item(l.strip()) for l in lines):
@@ -42,15 +55,23 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
 
     current_item: list[str] = []
     current_is_list = False
+    preamble: str | None = None
 
     def _flush() -> Iterator[ChecklistChunk]:
-        if current_item:
-            yield ChecklistChunk(
-                content="\n".join(current_item),
-                section=section,
-                chunk_type="checklist" if current_is_list else "paragraph",
-                page_number=page_number,
-            )
+        nonlocal preamble
+        if not current_item:
+            return
+        content = "\n".join(current_item)
+        if current_is_list and preamble:
+            content = f"{preamble} {content}"
+        yield ChecklistChunk(
+            content=content,
+            section=section,
+            chunk_type="checklist" if current_is_list else "paragraph",
+            page_number=page_number,
+        )
+        if not current_is_list:
+            preamble = content
 
     for line in lines:
         stripped = line.strip()

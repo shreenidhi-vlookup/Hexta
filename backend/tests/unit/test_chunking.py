@@ -84,9 +84,7 @@ class TestChecklistPreambleLabel:
         assert chunks[0].chunk_type == "paragraph"
         assert chunks[0].content == "Required documents for your application:"
         assert chunks[1].chunk_type == "checklist"
-        assert chunks[1].content == "- Pay stubs"
         assert chunks[2].chunk_type == "checklist"
-        assert chunks[2].content == "- Bank statements"
 
     def test_no_list_items_yields_nothing(self):
         assert list(chunk_checklist("Just a plain paragraph.\nAnother line.")) == []
@@ -96,6 +94,34 @@ class TestChecklistPreambleLabel:
         chunks = list(chunk_checklist(text))
         assert len(chunks) == 3
         assert all(c.chunk_type == "checklist" for c in chunks)
+
+
+class TestChecklistContextPrefix:
+    """Regression coverage: checklist items used to lose all lexical
+    connection to their own topic once split out from the preamble that
+    introduced them ("Eligibility for a VA loan depends on...following
+    categories:" / "- Veterans who served..."), so a query using the
+    preamble's own words (VA, eligible, loan) never matched the bullets
+    that were the actual answer. Each item now carries its preamble as
+    verbatim prefix -- still no synthesis, just not discarding context
+    that already existed in the source."""
+
+    def test_checklist_items_prefixed_with_preamble(self):
+        text = "Required documents for your application:\n- Pay stubs\n- Bank statements"
+        chunks = list(chunk_checklist(text))
+        assert chunks[1].content == "Required documents for your application: - Pay stubs"
+        assert chunks[2].content == "Required documents for your application: - Bank statements"
+
+    def test_preamble_chunk_itself_is_not_double_prefixed(self):
+        text = "Required documents for your application:\n- Pay stubs"
+        chunks = list(chunk_checklist(text))
+        assert chunks[0].content == "Required documents for your application:"
+
+    def test_no_preamble_no_prefix_added(self):
+        text = "- One\n- Two"
+        chunks = list(chunk_checklist(text))
+        assert chunks[0].content == "- One"
+        assert chunks[1].content == "- Two"
 
 
 class TestMinTokensMerge:
