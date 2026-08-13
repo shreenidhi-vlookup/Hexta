@@ -68,9 +68,16 @@ class TestMultiEntityPreviousTurn:
     subject used to be both canonicals joined ("veterans affairs down
     payment"), an incoherent mashup that -- prepended onto the *next*
     question -- verifiably broke retrieval (confidence dropped from 72.6%
-    to 54.0%, flipping routing from "partial" to "no_answer" for
-    "What are the eligibility requirements?"). Only the single most
-    prominent entity is used now."""
+    to 54.0%, flipping routing from "partial" to "no_answer"). Only the
+    single most prominent entity is used now.
+
+    Uses "What is the maximum age?" as the follow-up rather than the
+    original "What are the eligibility requirements?": that question is
+    now correctly recognized as self-contained (see
+    TestSelfContainedFollowup below) and no longer gets any subject
+    prepended at all, which would no longer exercise the single-vs-joined
+    entity behavior this class is about.
+    """
 
     HISTORY_TWO_ENTITIES = [
         {
@@ -81,10 +88,46 @@ class TestMultiEntityPreviousTurn:
 
     def test_only_first_entity_used_as_subject(self):
         resolved = resolve_references(
-            "What are the eligibility requirements?", self.HISTORY_TWO_ENTITIES
+            "What is the maximum age?", self.HISTORY_TWO_ENTITIES
         )
-        assert resolved == "veterans affairs What are the eligibility requirements?"
+        assert resolved == "veterans affairs What is the maximum age?"
         assert "down payment" not in resolved
+
+
+class TestSelfContainedFollowup:
+    """Regression: a bare-looking follow-up that names its own
+    self-contained information request (multi_question.is_self_contained_request)
+    must not get the previous turn's subject prepended, even without a
+    recognized domain ENTITY -- "eligibility requirements" isn't a
+    product/program, but it's still a complete topic, not a reference
+    back to whatever the previous turn was about.
+
+    Verified live: asked right after "What documents do I need to
+    apply?", "What are the eligibility requirements?" used to become
+    "documents need apply What are the eligibility requirements?" (no
+    clean canonical entity existed for "documents", so the fallback
+    joined leftover content words into a garbled subject), and the
+    answer degraded to a bare, item-less teaser sentence at 55%
+    confidence instead of the DTI/eligibility content the bare question
+    alone correctly retrieves.
+    """
+
+    HISTORY_DOCUMENTS = [
+        {
+            "question": "What documents do I need to apply?",
+            "answer": "Standard underwriting documentation includes...",
+        }
+    ]
+
+    def test_eligibility_requirements_untouched(self):
+        assert resolve_references(
+            "What are the eligibility requirements?", self.HISTORY_DOCUMENTS
+        ) == "What are the eligibility requirements?"
+
+    def test_required_documents_untouched(self):
+        assert resolve_references(
+            "What documents are required?", self.HISTORY_DOCUMENTS
+        ) == "What documents are required?"
 
 
 class TestReferentialPhrase:
