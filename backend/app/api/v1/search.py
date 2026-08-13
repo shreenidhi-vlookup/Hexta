@@ -32,7 +32,7 @@ from app.db.postgres.session import acquire
 from app.dependencies import require_auth
 from app.knowledge_gap.gap_detector import detect_and_log
 from app.query_processing import alias_resolver, domain_terms
-from app.query_processing import comparison, coreference
+from app.query_processing import comparison, coreference, scope_guard
 from app.query_processing.pipeline import process_query
 from app.ranking.reranker import rerank
 from app.ranking.rrf import rank_fusion
@@ -274,6 +274,31 @@ def _apply_relevance_gate(
 # off-topic and must not be presented as an answer (no-fabrication rule).
 _NO_ANSWER_RELEVANCE = 0.35
 
+# Ceiling applied when scope_guard flags a question -- comfortably under
+# confidence_thresholds.DEFAULT_THRESHOLDS.low (50), so route_by_confidence
+# always lands on no_answer for these regardless of how well retrieval
+# happened to score. Not 0: a non-zero, non-trivial number still shows up
+# distinctly in the audit log and knowledge_gaps table (gap_detector logs
+# a gap for any confidence under that same 50 floor) rather than reading
+# identically to a total retrieval miss.
+_OUT_OF_SCOPE_CONFIDENCE_CAP = 15.0
+
+
+def _apply_scope_guard(question: str, confidence: float) -> float:
+    """Cap confidence for questions no document lookup could ever answer.
+
+    Relevance-based gating cannot catch these (see scope_guard.py's module
+    docstring for why): the retrieved text is genuinely on-topic, so
+    relevance scores fine and confidence stays high. This check looks at
+    the question itself, independent of what was retrieved or how well it
+    scored, and is applied before the relevance gate so a personal-data or
+    fraud-intent question is capped even when retrieval happened to find
+    unusually on-topic text.
+    """
+    if scope_guard.out_of_scope_reason(question):
+        return min(confidence, _OUT_OF_SCOPE_CONFIDENCE_CAP)
+    return confidence
+
 
 def _decide_routing(
     question: str,
@@ -342,6 +367,11 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
         package.excerpts[0].text if package.excerpts else "",
         package.confidence,
     )
+    # Phase B.5: scope guard — cap confidence for questions no document
+    # lookup could ever answer, independent of relevance (see
+    # _apply_scope_guard). Applied after the relevance gate since it must
+    # win regardless of how on-topic retrieval happened to score.
+    package.confidence = _apply_scope_guard(question, package.confidence)
     package.routing = _decide_routing(
         question,
         package.answer_phrase,
