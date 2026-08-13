@@ -76,3 +76,24 @@ class TestMultiQuestionSplitting:
         )
         assert "what documents are required" in qs or "required documents" in qs
         assert len(qs) >= 2
+
+    def test_comma_joined_named_concepts_split(self):
+        """Regression: a comma-joined list of complete requests ("the VA
+        down payment, the FHA down payment, and the conventional
+        minimum") stayed merged into one over-broad question, because the
+        comma branch had no self-contained-request fallback at all --
+        only the "and" branch did, and even that only recognized
+        single-token metric aliases, missing "va"/"fha" (type "lender")
+        and multi-word aliases like "down payment" entirely."""
+        qs = split_questions(
+            "tell me the va down payment, the fha down payment, and the conventional minimum"
+        )
+        assert qs == [
+            "tell me the va down payment",
+            "the fha down payment",
+            "the conventional minimum",
+        ]
+
+    def test_named_program_alone_is_self_contained(self):
+        qs = split_questions("what is the va funding fee and the fha mip")
+        assert len(qs) == 2
