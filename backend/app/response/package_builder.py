@@ -13,18 +13,34 @@ import uuid
 from dataclasses import dataclass, field
 
 from app.config import settings
-from app.query_processing.relevance import relevance_factor
+from app.query_processing import domain_terms
+from app.query_processing.relevance import (
+    _RELEVANCE_STOP,
+    content_term_groups,
+    relevance_factor,
+    term_present,
+    term_stem_candidates,
+)
 from app.ranking.rrf import RRF_K, RankedCandidate
+from app.ranking.weights_config import DEFAULT_WEIGHTS
 
 
 def _normalize_rrf_score(rrf_score: float) -> float:
     """Normalize an RRF score to a 0-100 confidence scale.
 
-    The maximum possible RRF score is 2/(K+1) when a candidate ranks
-    first in both the BM25 and vector lists. We normalize against
-    that theoretical maximum and cap at 100.
+    The maximum possible RRF score is (bm25_weight + vector_weight)/(K+1),
+    achieved when a candidate ranks first in both the BM25 and vector
+    lists. We normalize against that theoretical maximum and cap at 100.
+
+    The weight sum must come from the same config rank_fusion() uses, not
+    a hardcoded 2.0: that constant was only correct while fusion summed
+    the two reciprocal ranks unweighted. Once weights were applied (they
+    sum to 1.0 by default), a hardcoded 2.0 halved every confidence in
+    the system -- verified live, six previously-answerable queries all
+    dropped from 82-99% to 41-50% and routed to no_answer purely from
+    this mismatch.
     """
-    max_rrf = 2.0 / (RRF_K + 1)
+    max_rrf = (DEFAULT_WEIGHTS.bm25_weight + DEFAULT_WEIGHTS.vector_weight) / (RRF_K + 1)
     if max_rrf <= 0:
         return 0.0
     return min((rrf_score / max_rrf) * 100.0, 100.0)
@@ -98,12 +114,30 @@ def _is_question(sentence: str) -> bool:
     Detects a trailing '?' or an interrogative opener. A genuine answer
     sentence like "Minimum credit score requirements vary by product." is
     not flagged (starts with "Minimum", which is not in the wh-openers).
+
+    The opener check only applies when the sentence has no terminal
+    punctuation of its own to go on (a heading-style fragment, e.g. "What
+    is a lifetime mortgage" typo'd without its "?"). Several wh-openers
+    ("when", "which", "where", "who") are equally common as the start of a
+    *statement* using them as a relative pronoun or subordinating
+    conjunction rather than an interrogative -- "When a borrower uses a
+    second mortgage..., underwriters calculate the combined loan-to-value
+    ratio..." is a complete, correct answer sentence, not a question, even
+    though it opens with "When". A sentence ending in real terminal
+    punctuation (".", "!") is, in formatted prose, essentially never an
+    actual question -- genuine questions end in "?" -- so once there's a
+    non-"?" terminator to go on, that settles it over the opener guess
+    (verified live: this was silently discarding the one correct sentence
+    in an excerpt and letting an unrelated sentence win instead).
     """
     s = sentence.strip()
     if not s:
         return False
     if s.endswith("?"):
         return True
+    if s[-1] in _TERMINAL_PUNCT:
+        # Ends in "." or "!" -- a statement, regardless of its opening word.
+        return False
     first = s.split(" ", 1)[0].lower().rstrip("?")
     return first in _WH_OPENERS
 
@@ -150,12 +184,25 @@ def _strip_leading_heading(text: str) -> str:
 
 
 def _starts_cleanly(text: str) -> bool:
-    """True when the excerpt begins at a plausible sentence boundary.
+    """True when the excerpt begins at a plausible sentence/unit boundary.
 
     Chunks produced from the hard-cut generated QA docs often open
     mid-word ("l mortgages", "ents.", "ransfer"); those make poor
     answer sources. A clean start is an uppercase letter, a digit, an
-    opening quote, or a bullet/number marker.
+    opening quote, a bullet/number marker, or a markdown table row.
+
+    Markdown table chunks (chunk_type == "table") intentionally start
+    with "|" -- that's not a mid-word truncation artifact, it's the
+    complete, well-formed start of the row. Without recognizing it, every
+    table excerpt failed this check and was silently dropped from
+    ``clean_excerpts`` in build_response_package(), which meant table
+    excerpts never took part in relevance-based phrase-source ranking and
+    always fell back to whichever table happened to rank first by raw
+    retrieval score -- regardless of which one actually answered the
+    question. Verified live: for "What is the minimum down payment for a
+    VA loan?", the correct table (relevance 0.6) was excerpt #2 and the
+    wrong one (relevance 0.4) was excerpt #1; both got excluded here, so
+    the excerpt-order fallback picked the wrong one every time.
     """
     stripped = (text or "").lstrip()
     if not stripped:
@@ -165,11 +212,216 @@ def _starts_cleanly(text: str) -> bool:
         first.isupper()
         or first.isdigit()
         or first in "\"'"
-        or stripped.startswith(("*", "-", "\u2022"))
+        or stripped.startswith(("*", "-", "\u2022", "|"))
     )
 
 
-def _extract_answer_phrase(text: str, max_chars: int = 200) -> str:
+def _term_match_count(sentence: str, groups: list[set[str]]) -> int:
+    """How many query content *concepts* appear in ``sentence``.
+
+    Counts term groups, not flat terms, so an abbreviation and its
+    spelled-out expansion count once between them (see
+    relevance.content_term_groups). Scoring the flat terms instead lets a
+    sentence win just by spelling an abbreviation out: for "when is PMI
+    automatically removed?", the sentence that merely *defines* the term
+    ("...requires Private Mortgage Insurance (PMI).") matched four flat
+    terms -- pmi, private, mortgage, insurance -- while the sentence that
+    actually answers ("PMI can be removed automatically once the loan
+    balance reaches 78%...") matched three, so the definition won and the
+    answer was never surfaced.
+    """
+    hay = sentence.lower()
+    return sum(1 for g in groups if any(term_present(t, hay) for t in g))
+
+
+_QUERY_WORD_RE = re.compile(r"[a-z0-9']+")
+
+
+def _query_phrases(query_text: str | None) -> list[str]:
+    """Adjacent content-word pairs from the query ("second home").
+
+    Bag-of-words relevance cannot tell a compound concept from its words
+    appearing separately: for "What is the maximum LTV for a second
+    home?", a paragraph about a "second mortgage" alongside a "home
+    equity line of credit" contains both "second" and "home" and scores a
+    perfect 1.0, identical to the table that actually lists "Second home
+    | 90%". Tracking the query's adjacent word pairs gives a signal that
+    separates them -- only the table contains the pair contiguously.
+    """
+    if not query_text:
+        return []
+    words = _QUERY_WORD_RE.findall(query_text.lower())
+    content = [
+        (i, w) for i, w in enumerate(words)
+        if w not in _RELEVANCE_STOP and w not in domain_terms.QUESTION_STARTERS
+    ]
+    phrases: list[str] = []
+    for (i, w1), (j, w2) in zip(content, content[1:]):
+        if j == i + 1:  # literally adjacent in the query
+            phrases.append(f"{w1} {w2}")
+    return phrases
+
+
+def _phrase_pattern(phrase: str) -> re.Pattern:
+    """Adjacency regex for a two-word phrase, tolerant of word endings.
+
+    Each word is reduced to its shortest stem and allowed a suffix, so
+    "hvac filters" still matches "HVAC filter replacement". Exact
+    substring matching was too brittle for this: the plural in the query
+    made the phrase miss the very table row that answered it ("| HVAC
+    filter replacement | Every 1-3 months |") while matching a checklist
+    that happened to use the plural ("Replacing light bulbs and HVAC
+    filters"), handing the tie to the wrong chunk.
+    """
+    parts = []
+    for word in phrase.split():
+        root = min(term_stem_candidates(word), key=len)
+        parts.append(re.escape(root) + r"\w*")
+    return re.compile(r"\b" + r"\s+".join(parts), re.IGNORECASE)
+
+
+def _phrase_hits(text: str, phrases: list[str]) -> int:
+    """How many query compound phrases appear (stem-tolerant) in ``text``."""
+    if not phrases:
+        return 0
+    hay = text.lower()
+    return sum(1 for p in phrases if _phrase_pattern(p).search(hay))
+
+
+def _score_key(text: str, groups: list[set[str]], wants_number: bool) -> tuple:
+    """Ranking key for a candidate fragment: numbers first, then coverage.
+
+    When the query itself contains a figure ("...with a 580 credit
+    score", "0% down"), a fragment that carries a number outranks one
+    that doesn't, before term coverage breaks the remaining tie. This is
+    the same rule _phrase_rank already applies when choosing *between*
+    excerpts, applied again *within* one -- without it, the framing
+    sentence of a chunk reliably beats the line holding the answer,
+    because naming the topic uses more of the question's words than
+    stating the figure does. Verified live: for "What down payment do I
+    need for an FHA loan with a 580 credit score?", the intro
+    ("...the down payment required depends directly on the applicant's
+    credit score:") covers six query concepts while the item that
+    answers ("- Borrowers with a credit score of 580 or higher qualify
+    for the minimum down payment of 3.5%") covers five, so the question
+    was answered with a restatement of itself and the 3.5% was truncated
+    away entirely.
+    """
+    has_number = bool(re.search(r"\d", text)) if wants_number else False
+    return (has_number, _term_match_count(text, groups))
+
+
+def _best_snippet(
+    sentence: str, groups: list[set[str]], max_chars: int, wants_number: bool = False
+) -> str:
+    """Pick the ``max_chars``-wide, word-aligned window of ``sentence`` that
+    covers the most query content terms, instead of always the prefix.
+
+    A single long run-on sentence can bury the actual answer well past
+    where a naive prefix truncation would cut off -- e.g. scene-setting
+    clauses first ("Recent bankruptcies, foreclosures, or short sales
+    impose mandatory waiting periods before a borrower is eligible for a
+    new mortgage,...") with the specific figure only in the back half
+    ("...two years for FHA loans following a Chapter 7 bankruptcy
+    discharge..."). A plain prefix cut can land before the figure and
+    leave the query's own terms out of the phrase entirely, which then
+    also tanks the query<->answer relevance score downstream. Falls back
+    to a plain prefix truncation when no window beats it (no query terms,
+    or none of them appear anywhere in the sentence).
+
+    Text that already fits is returned untouched: windowing exists to
+    decide *what to drop* when something must be dropped, so applying it
+    to a fragment that needs no cut would only shorten a complete,
+    verbatim answer (a short checklist item would come back as its first
+    few words plus an ellipsis).
+    """
+    if len(sentence) <= max_chars:
+        return sentence
+    words = sentence.split()
+    if not words or not groups:
+        return _truncate(sentence, max_chars)
+    start = 0
+    best_start, best_end = 0, -1
+    best_score: tuple = (False, -1)
+    # Window length is the last tiebreaker: among windows covering the
+    # same concepts, keep the longest one that still fits. Preferring the
+    # first/shortest instead throws away budget that is already paid for
+    # and can cut the answer off right after the words it matched on --
+    # "...applicants generally fall into one of the following categories:
+    # Veterans who served..." scores its maximum at "Eligibility for a
+    # VA-backed loan", so the phrase stopped there and dropped the item
+    # the reader actually needed.
+    best_key: tuple = (False, -1, -1)
+    for end in range(len(words)):
+        while start < end and len(" ".join(words[start : end + 1])) > max_chars:
+            start += 1
+        window = " ".join(words[start : end + 1])
+        if len(window) > max_chars:
+            continue
+        score = _score_key(window, groups, wants_number)
+        key = (*score, len(window))
+        if key > best_key:
+            best_key, best_score, best_start, best_end = key, score, start, end
+    if best_end < 0 or best_score <= (False, 0):
+        return _truncate(sentence, max_chars)
+    snippet = " ".join(words[best_start : best_end + 1])
+    prefix = "…" if best_start > 0 else ""
+    suffix = "…" if best_end < len(words) - 1 else ""
+    return f"{prefix}{snippet}{suffix}"
+
+
+_TABLE_SEPARATOR_RE = re.compile(r"^[|\s:-]+$")
+
+
+def _table_row_phrase(
+    text: str, groups: list[set[str]], max_chars: int, wants_number: bool = False
+) -> str:
+    """Pick the single table row that best answers the query.
+
+    A markdown table chunk is a stack of independent rows, not prose: the
+    row that answers the question is rarely the first one, but the phrase
+    for a table used to be a plain prefix truncation of the whole chunk.
+    That returns the header plus whichever rows happen to come first, and
+    cuts off the relevant row entirely when it sits lower down -- verified
+    live: "What is the minimum down payment for a VA loan?" produced a
+    phrase containing the Conventional and FHA rows while the "| VA | 0%
+    for eligible borrowers | 100% |" row was truncated away, so the answer
+    never showed the figure it was asked for.
+
+    Each data row is scored by query-term coverage and the best one is
+    returned verbatim -- a table row is already a complete, atomic unit of
+    evidence (the full table is always visible in the source excerpt below
+    the answer). Separator rows ("|---|---|") are skipped.
+
+    The first row is the header and is excluded from selection whenever
+    the table has data rows at all: its cells are column *names*, so it
+    reliably out-scores every data row on query-term overlap while
+    containing no answer -- for "what is the max ltv for investment
+    property", the header "Property Type | Max LTV | Min Down Payment"
+    matches three query terms and the row that actually answers
+    ("Investment Property | 85% | 15%") matches two. This is the same
+    principle _is_heading applies to prose: a label is never an answer.
+
+    Falls back to the previous whole-chunk truncation when there are no
+    data rows, no query terms, or no data row matches any query term.
+    """
+    rows = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not _TABLE_SEPARATOR_RE.match(line.strip())
+    ]
+    data_rows = rows[1:] if len(rows) > 1 else rows
+    if not data_rows or not groups:
+        return _truncate(text, max_chars)
+    best = max(data_rows, key=lambda r: _score_key(r, groups, wants_number))
+    if _score_key(best, groups, wants_number) <= (False, 0):
+        return _truncate(text, max_chars)
+    return _truncate(best, max_chars)
+
+
+def _extract_answer_phrase(
+    text: str, max_chars: int = 200, query_text: str | None = None
+) -> str:
     """Extract a single answer phrase from a source chunk text.
 
     Prefers the first substantive (≥ 25 chars) *statement* sentence that
@@ -178,10 +430,40 @@ def _extract_answer_phrase(text: str, max_chars: int = 200) -> str:
     never a usable answer, so if the chunk contains only those the result
     is an empty string (the caller routes to ``no_answer``). No synthesis —
     the phrase is always traceable to a source chunk.
+
+    When ``query_text`` is given, "first substantive sentence" is no
+    longer a good enough rule on its own: a chunk is often a short
+    paragraph of several sentences, and the one that actually answers the
+    question is not always the first (e.g. "FHA loans are intended for
+    primary residences only. The borrower must occupy the property within
+    60 days of closing..." -- the first sentence is on-topic but doesn't
+    contain the number the question asked for). In that case *every*
+    candidate sentence is scored by how many of the query's content terms
+    it contains -- short and over-length alike, scored on its full text
+    before any truncation, so the right sentence can't lose purely for
+    being long (an earlier version of this scored only the short
+    candidates and fell back to the first over-length sentence unscored,
+    so a short-but-wrong sentence always beat a long-but-right one; fixed
+    after live-verifying the FHA occupancy query still returned the wrong
+    "loan limits vary by county" sentence over the correct "must occupy
+    within 60 days" one, which is 220 characters). The best-scoring
+    sentence wins regardless of length, truncated to a term-dense window
+    via ``_best_snippet`` if it's over-length. Ties (including "no query
+    term matched anywhere," the common case for queries this scoring
+    can't help with) keep the original first-sentence choice, since
+    ``max()`` returns the first maximal element on a tie. Without
+    ``query_text`` the behavior is unchanged from before this existed.
     """
     if not text:
         return ""
     text = _strip_leading_heading(text)
+    groups = content_term_groups(query_text) if query_text else []
+    wants_number = bool(re.search(r"\d", query_text or ""))
+
+    # (sentence, is_over_length) for every substantive candidate, in
+    # source order -- scored together so length never disqualifies a
+    # sentence from competing on relevance.
+    scored: list[tuple[str, bool]] = []
     fallback: list[str] = []
     for sentence in _SENTENCE_RE.split(text):
         s = sentence.strip()
@@ -192,13 +474,25 @@ def _extract_answer_phrase(text: str, max_chars: int = 200) -> str:
         if _is_heading(s):
             # Section heading — never an answer, regardless of length.
             continue
-        if len(s) > max_chars:
-            # A long statement (e.g. truncated at a chunk boundary) is still
-            # an answer — cut it at a word boundary with an ellipsis.
-            return _truncate(s, max_chars)
-        if len(s) >= 25:
-            return s
-        fallback.append(s)
+        is_long = len(s) > max_chars
+        if not is_long and len(s) < 25:
+            fallback.append(s)
+            continue
+        if not groups:
+            # No query to score against: original behavior, first
+            # qualifying sentence wins immediately.
+            return _truncate(s, max_chars) if is_long else s
+        scored.append((s, is_long))
+
+    if scored:
+        best, best_is_long = max(
+            scored, key=lambda p: _score_key(p[0], groups, wants_number)
+        )
+        return (
+            _best_snippet(best, groups, max_chars, wants_number)
+            if best_is_long
+            else best
+        )
     # No substantive statement: fall back to the first short statement that
     # is not a heading/question (e.g. "Yes."). If everything was a heading
     # or a question, there is no answer.
@@ -287,12 +581,17 @@ def build_response_package(
     clean_excerpts = [e for e in excerpts if _starts_cleanly(e.text)]
     query_wants_number = bool(re.search(r"\d", query_text or ""))
 
+    # Compound phrases from the query ("second home") break relevance ties
+    # that bag-of-words scoring can't -- see _query_phrases.
+    query_phrases = _query_phrases(query_text)
+
     def _phrase_rank(e: Excerpt) -> tuple:
         rel = round(relevance_factor(query_text, e.text), 2)
+        hits = _phrase_hits(e.text, query_phrases)
         not_teaser = not e.text.rstrip().endswith(":")
         if query_wants_number:
-            return (bool(re.search(r"\d", e.text)), rel, not_teaser)
-        return (rel, not_teaser)
+            return (bool(re.search(r"\d", e.text)), rel, hits, not_teaser)
+        return (rel, hits, not_teaser)
 
     def _phrase_from(e: Excerpt) -> str:
         if e.source.chunk_type in ("table", "checklist"):
@@ -310,8 +609,27 @@ def build_response_package(
             # atomic units of evidence on their own -- their own truncated
             # verbatim text stands in as the phrase directly. No
             # synthesis, just the same length cap applied to prose.
+            #
+            # Neither is truncated from the top any more, because the
+            # answer is rarely in the first 200 characters of either:
+            # a table's answer is one row somewhere down the list, and a
+            # checklist chunk is "preamble + item" (see
+            # checklist_chunker.py) whose preamble alone can fill the
+            # whole cap. Verified live: "What down payment do I need for
+            # an FHA loan with a 580 credit score?" returned only the
+            # intro clause, with the "- Borrowers with a credit score of
+            # 580 or higher qualify for the minimum down payment of 3.5%"
+            # item cut off -- the question answered with a restatement of
+            # itself. Tables select the best row; checklists take the
+            # best-covering window. Both stay verbatim.
+            groups = content_term_groups(query_text) if query_text else []
+            wants_number = bool(re.search(r"\d", query_text or ""))
+            if e.source.chunk_type == "table":
+                return _table_row_phrase(e.text, groups, 200, wants_number)
+            if groups:
+                return _best_snippet(e.text, groups, 200, wants_number)
             return _truncate(e.text, 200)
-        return _extract_answer_phrase(e.text)
+        return _extract_answer_phrase(e.text, query_text=query_text)
 
     # Excerpts are tried in _phrase_rank order (best first), falling
     # through to the next one whenever a candidate can't produce a phrase

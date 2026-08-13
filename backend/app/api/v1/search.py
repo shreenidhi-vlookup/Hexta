@@ -229,6 +229,31 @@ def _recalibrate_confidence(confidence: float, relevance: float) -> float:
     return confidence * factor
 
 
+def _evidence_relevance(question: str, answer_phrase: str, top_excerpt: str) -> float:
+    """Best query↔evidence relevance across the phrase and its excerpt.
+
+    The question this gate is really asking is "is the retrieved evidence
+    on-topic?", and the answer phrase is only the highlighted fragment of
+    that evidence -- so the excerpt as a whole gets a say too, and the
+    stronger signal wins.
+
+    Scoring the phrase alone punishes correct but terse answers: the row
+    "| VA | 0% for eligible borrowers | 100% |" is exactly the answer to
+    "What is the minimum down payment for a VA loan?", yet it repeats only
+    one of the question's content terms, scoring 0.25 -- under the 0.35
+    floor -- and was forced to no_answer despite the surrounding table
+    excerpt (with its "Minimum Down Payment" header and "Loan Type"
+    column) being unambiguously on-topic. Scoring the excerpt alone has
+    the opposite failure: a long chunk can cover the question's words
+    incidentally while the phrase drawn from it is off-topic. Taking the
+    max keeps the gate's real job -- catching retrieval that missed the
+    topic entirely, where neither the phrase nor its excerpt matches.
+    """
+    phrase_rel = _relevance_factor(question, answer_phrase) if answer_phrase else 0.0
+    excerpt_rel = _relevance_factor(question, top_excerpt) if top_excerpt else 0.0
+    return max(phrase_rel, excerpt_rel)
+
+
 def _apply_relevance_gate(
     question: str,
     answer_phrase: str,
@@ -239,8 +264,7 @@ def _apply_relevance_gate(
 
     Falls back to the top excerpt text when no answer phrase was extracted.
     """
-    evidence = answer_phrase or top_excerpt or ""
-    relevance = _relevance_factor(question, evidence)
+    relevance = _evidence_relevance(question, answer_phrase, top_excerpt)
     return _recalibrate_confidence(confidence, relevance)
 
 
@@ -268,7 +292,7 @@ def _decide_routing(
     """
     if not (answer_phrase or "").strip():
         return "no_answer"
-    relevance = _relevance_factor(question, answer_phrase or top_excerpt or "")
+    relevance = _evidence_relevance(question, answer_phrase, top_excerpt)
     if relevance < _NO_ANSWER_RELEVANCE:
         return "no_answer"
     return route_by_confidence(confidence)

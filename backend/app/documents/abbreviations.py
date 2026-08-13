@@ -53,11 +53,59 @@ def _clean_canonical_phrase(text: str) -> str:
     return " ".join(out).strip().lower()
 
 
+def _initials(phrase: str) -> tuple[str, str]:
+    """Initials of ``phrase``, with and without connectives.
+
+    Hyphens and slashes split words too, so "Loan-to-Value" contributes
+    l, t, v rather than a single "l".
+    """
+    tokens = [t for t in re.split(r"[\s\-/]+", phrase) if t]
+    with_connectives = "".join(t[0] for t in tokens).lower()
+    without_connectives = "".join(
+        t[0] for t in tokens if t.lower() not in _CONNECTIVES
+    ).lower()
+    return with_connectives, without_connectives
+
+
+def _trim_to_acronym(canonical: str, alias: str) -> str | None:
+    """Shortest trailing span of ``canonical`` whose initials spell ``alias``.
+
+    The "Full Term (ACR)" pattern captures up to ten preceding title-case
+    words, which over-captures badly on headings: the document title
+    "Down Payment and Loan-to-Value (LTV) Requirements" yielded the alias
+    LTV -> "down payment and loan-to-value". Every later query mentioning
+    LTV then had that whole phrase appended to its search text, dragging
+    retrieval toward that one document and injecting an unrelated concept
+    ("down payment") -- verified live: "What is the maximum LTV for an
+    investment property?" returned the combined-LTV paragraph from the
+    over-captured document with high confidence while the table holding
+    the actual answer fell out of the top three entirely.
+
+    An acronym's expansion is initial-consistent by definition, so leading
+    words are dropped until the initials line up: the same title then
+    yields the correct LTV -> "loan-to-value". Returns None when no span
+    matches, so a bogus alias is never stored -- a wrong expansion
+    silently corrupts every query containing that acronym, which is worse
+    than having no expansion at all (domain_terms.py already covers the
+    common industry acronyms).
+    """
+    words = canonical.split()
+    for start in range(len(words)):
+        candidate = " ".join(words[start:])
+        if alias in _initials(candidate):
+            return candidate
+    return None
+
+
 def _add(pairs: list[tuple[str, str]], seen: set[str], alias: str, canonical: str) -> None:
     alias = alias.strip().lower()
     canonical = _clean_canonical_phrase(canonical)
     if len(alias) < 2 or len(canonical) < 3:
         return
+    trimmed = _trim_to_acronym(canonical, alias)
+    if trimmed is None:
+        return
+    canonical = trimmed
     if alias == canonical or alias in canonical:
         return
     if alias in seen:
