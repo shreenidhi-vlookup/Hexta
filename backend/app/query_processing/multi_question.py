@@ -79,8 +79,9 @@ def is_independent_clause(fragment: str) -> bool:
 def is_self_contained_request(text: str) -> bool:
     """True when a noun phrase names a complete information request.
 
-    ``"max dti"`` (limit), ``"required documents"`` (ends in an info-noun)
-    and ``"first time buyer programs"`` are each self-contained intents.
+    ``"max dti"`` (limit), ``"required documents"`` (ends in an info-noun),
+    ``"first time buyer programs"``, and ``"the VA down payment"`` (names
+    a recognized program + metric) are each self-contained intents.
     ``"income"`` or ``"employment"`` alone are bare attributes, not
     complete requests, so they keep a list together instead of splitting.
     """
@@ -93,9 +94,10 @@ def is_self_contained_request(text: str) -> bool:
     words = set(frag.split())
     if words & _INFO_NOUNS:
         return True
-    # A single-word domain metric alias ("dti", "ltv", "apr" ...) is a
-    # concrete, answerable quantity in itself.
-    if any(domain_terms.type_of(tok) == "metric" for tok in words):
+    # Any recognized domain concept -- a program ("va", "fha"), a metric
+    # ("down payment", "dti"), a document, a property type -- makes this
+    # a concrete, answerable request in itself, not a bare attribute.
+    if domain_terms.contains_known_concept(frag):
         return True
     return False
 
@@ -130,6 +132,17 @@ def split_questions(norm: str) -> list[str]:
             current = text
         elif delim == ",":
             if is_independent_clause(text):
+                questions.append(current)
+                current = text
+            elif is_self_contained_request(current) and is_self_contained_request(text):
+                # Mirrors the conjunction branch below: a comma-joined list
+                # of complete requests ("the VA down payment, the FHA down
+                # payment, and the conventional minimum") is as much a
+                # multi-question as an "and"-joined one -- only the last
+                # item happened to pick up the "and". Without this, the
+                # comma items merged all the way through to the very end,
+                # since this branch previously had no self-contained-request
+                # fallback at all, unlike the conjunction branch just below.
                 questions.append(current)
                 current = text
             else:

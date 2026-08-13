@@ -328,6 +328,31 @@ def multiword_aliases() -> list[str]:
     return [a for a in _ALIAS_INDEX if " " in a]
 
 
+def contains_known_concept(text: str) -> bool:
+    """True when ``text`` names any recognized domain concept -- a program
+    ("va", "fha", "conventional"), a metric ("dti", "down payment"), a
+    document, a property type, or a process -- single- or multi-word.
+
+    Used by multi_question.py to decide whether a bare noun-phrase list
+    item is a complete, answerable request on its own ("the VA down
+    payment") versus an incomplete attribute that needs the rest of its
+    sentence ("income"). Checking every alias type, not just "metric",
+    and multi-word aliases as substrings, not just single tokens, both
+    matter: a single-token restriction to metrics alone missed "va" and
+    "fha" (type "lender") entirely, and "down payment" is two words, so
+    "the VA down payment, the FHA down payment, and the conventional
+    minimum" tested every one of its three items as an incomplete
+    fragment and the whole thing merged into one over-broad question.
+    """
+    t = (text or "").lower()
+    if not t:
+        return False
+    tokens = set(re.findall(r"[a-z0-9']+", t))
+    if tokens & aliases():
+        return True
+    return any(alias in t for alias in multiword_aliases())
+
+
 # Scenario → concept mapping. Users describe a situation instead of
 # naming the underlying product/concept. When a pattern matches a
 # sub-query, its concept is appended to the expanded search text so the

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.query_processing import domain_terms
+from app.query_processing import comparison, domain_terms
 from app.query_processing import entity_extraction as ent
 from app.query_processing import intent_detection, multi_question, normalization
 from app.query_processing import query_expansion as qexpand
@@ -64,7 +64,21 @@ def _build_sub_query(sub: str) -> StructuredQuery:
 
 def process_query(raw: str) -> QueryPlan:
     normalized = normalization.normalize(raw)
-    subs, truncated = multi_question.plan_split(normalized)
+    if comparison.is_comparison(normalized):
+        # A comparison question ("difference between PMI and MIP",
+        # "compare FHA and conventional scores") must survive as a single
+        # sub-query. multi_question.split_questions treats "and" as a
+        # boundary, and "difference between"/"compare ... and ..." both
+        # use "and" as their own connector -- so the splitter cut the
+        # question into two independent-looking pieces ("difference
+        # between pmi", "mip") before search.py's comparison-operand
+        # expansion (which only runs when there is exactly one sub-query)
+        # ever got a chance to see it, silently downgrading a comparison
+        # into two unrelated single-topic searches. "X vs Y" phrasing
+        # doesn't use "and" and was never affected by this.
+        subs, truncated = [normalized], False
+    else:
+        subs, truncated = multi_question.plan_split(normalized)
     structured = [_build_sub_query(s) for s in subs]
     return QueryPlan(raw=raw, normalized=normalized, sub_queries=structured, truncated=truncated)
 
