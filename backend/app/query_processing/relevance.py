@@ -34,24 +34,63 @@ _RELEVANCE_STOP = frozenset((
 ))
 
 
+def content_term_groups(question: str) -> list[set[str]]:
+    """Content terms grouped so an abbreviation and its canonical expansion
+    count as *one* concept, satisfied by either form, rather than several
+    independently-required terms.
+
+    A flat set (the old behavior of ``query_content_terms``, still returned
+    below for callers that want that) treats "fha" -> {"fha", "federal",
+    "housing", "administration"} as four separately-required terms. That's
+    right for the case the expansion exists for -- the query says "dti",
+    the answer spells out "debt-to-income" -- but wrong for the far more
+    common reverse case: the query says "FHA" and the answer *also* says
+    "FHA" (mortgage prose almost always uses the abbreviation), yet flat
+    scoring marked it as missing "federal", "housing", and
+    "administration", dragging a clearly on-topic answer's relevance down
+    by 3/4 of that one concept for no reason (verified live: "How soon
+    must I occupy a home financed with an FHA loan?" scored 0.44 relevance
+    against a correct, on-topic answer, entirely because of this). Grouping
+    keeps the expansion useful for its original purpose without punishing
+    the reverse case: a group counts as matched if *any* member -- the
+    original abbreviation or any word of its spelled-out form -- appears.
+    """
+    toks = re.split(r"[^a-z']+", (question or "").lower())
+    groups: list[set[str]] = []
+    for t in toks:
+        if t in domain_terms.QUESTION_STARTERS or t in _RELEVANCE_STOP:
+            continue
+        # Tokens shorter than 3 chars are noise ("of", "an", stray letters)
+        # *unless* they're a known domain term: "va" is only two characters
+        # but it is the entire subject of "what is the minimum down payment
+        # for a VA loan?". Dropping it left that query with the terms
+        # {down, payment, loan} -- true of every loan program in the corpus
+        # -- so nothing could distinguish the VA row from the FHA or
+        # conventional ones, and relevance scoring had no signal to rank on.
+        if len(t) < 3 and domain_terms.canonical_of(t) == t:
+            continue
+        group = {t}
+        canon = domain_terms.canonical_of(t)
+        if canon != t:
+            group.update(
+                w for w in canon.split()
+                if len(w) >= 3 and w not in _RELEVANCE_STOP
+            )
+        groups.append(group)
+    return groups
+
+
 def query_content_terms(question: str) -> set[str]:
     """Significant content tokens in a question (drop starters + stopwords).
 
     Domain abbreviations are expanded to their canonical words so a query
     term like "dti" also matches an answer that spells out "debt-to-income".
+    Returns the flat union of all term groups -- see ``content_term_groups``
+    for the grouped form ``relevance_factor`` actually scores against.
     """
-    toks = re.split(r"[^a-z']+", (question or "").lower())
     terms: set[str] = set()
-    for t in toks:
-        if len(t) < 3 or t in domain_terms.QUESTION_STARTERS or t in _RELEVANCE_STOP:
-            continue
-        terms.add(t)
-        canon = domain_terms.canonical_of(t)
-        if canon != t:
-            terms.update(
-                w for w in canon.split()
-                if len(w) >= 3 and w not in _RELEVANCE_STOP
-            )
+    for group in content_term_groups(question):
+        terms.update(group)
     return terms
 
 
@@ -99,17 +138,21 @@ def term_present(term: str, hay: str) -> bool:
 
 
 def relevance_factor(question: str, answer_text: str) -> float:
-    """Fraction of the query's content terms present in the answer, in [0,1].
+    """Fraction of the query's content *concepts* present in the answer, in [0,1].
 
-    1.0 means every significant query term appears in the answer (clearly
-    on-topic). 0.0 means none do (off-topic retrieval — the RRF score was
-    inflated by common words or a wrong domain subtopic).
+    1.0 means every significant query concept appears in the answer
+    (clearly on-topic). 0.0 means none do (off-topic retrieval — the RRF
+    score was inflated by common words or a wrong domain subtopic).
+    Scored per term group (see ``content_term_groups``), not per flat
+    term, so an abbreviation and its spelled-out expansion count as one
+    concept satisfied by either form, instead of the answer needing to
+    contain every word of the expansion on top of the abbreviation.
     """
-    terms = query_content_terms(question)
-    if not terms:
+    groups = content_term_groups(question)
+    if not groups:
         return 1.0
     hay = (answer_text or "").lower()
     if not hay:
         return 0.0
-    matched = sum(1 for t in terms if term_present(t, hay))
-    return matched / len(terms)
+    matched = sum(1 for group in groups if any(term_present(t, hay) for t in group))
+    return matched / len(groups)
