@@ -3,6 +3,7 @@
 // this module so it can be swapped for server-side persistence later.
 
 import { getCurrentUserId } from "./auth";
+import type { SearchResponse } from "./api-client";
 
 export const CHATS_STORAGE_KEY = "hexa_recent_chats";
 export const CHAT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -12,6 +13,14 @@ export type ChatRole = "user" | "assistant";
 export interface ChatTurn {
   role: ChatRole;
   content: string;
+  // Full response package for assistant turns, persisted alongside the
+  // plain-text `content` so a restored chat (page refresh, chat switch)
+  // can re-render through ResponsePackageCard/MultiAnswerCard exactly as
+  // it did live -- including the routing check that shows "No answer
+  // found" instead of the raw (possibly low-confidence or off-topic)
+  // answer_phrase text. Without this, `content` alone can't tell a
+  // suppressed no_answer response apart from a real one on restore.
+  response?: SearchResponse;
 }
 
 export interface RecentChat {
