@@ -6,6 +6,7 @@ from __future__ import annotations
 from app.api.v1.search import (
     _apply_fragment_penalty,
     _apply_relevance_gate,
+    _apply_scope_guard,
     _dampen_generic_confidence,
     _decide_routing,
     _is_bare_followup,
@@ -262,6 +263,34 @@ class TestRoutingSafety:
             )
             == "partial"
         )
+
+
+class TestScopeGuard:
+    """Phase B.5: personal-data and fraud-intent questions must route to
+    no_answer even when retrieval finds genuinely on-topic text -- see
+    scope_guard.py for why relevance scoring alone cannot catch these."""
+
+    def test_personal_data_question_capped_regardless_of_confidence(self):
+        assert _apply_scope_guard("What is my account balance?", 100.0) < 50.0
+
+    def test_fraud_intent_question_capped_regardless_of_confidence(self):
+        assert _apply_scope_guard("How do I forge a pay stub?", 95.7) < 50.0
+
+    def test_legitimate_question_confidence_unchanged(self):
+        assert _apply_scope_guard("What is the FHA down payment?", 96.9) == 96.9
+
+    def test_cap_never_raises_a_lower_confidence(self):
+        # A genuinely low-confidence retrieval for a guarded question
+        # must not be pulled *up* to the cap.
+        assert _apply_scope_guard("What is my account balance?", 5.0) == 5.0
+
+    def test_capped_confidence_routes_to_no_answer(self):
+        """End-to-end: the capped value must actually clear route_by_confidence's
+        no_answer floor, not just be numerically lower."""
+        from app.response.confidence_thresholds import route_by_confidence
+
+        capped = _apply_scope_guard("What is my credit score?", 100.0)
+        assert route_by_confidence(capped) == "no_answer"
 
 
 def _recalibrate_confidence_stub(confidence, relevance):
