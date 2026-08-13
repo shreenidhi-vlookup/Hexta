@@ -200,11 +200,22 @@ COMMON_WORDS: set[str] = {
      "credit", "score", "fico", "loan", "money", "funds", "down", "payment",
      "investment", "property", "properties", "value", "home", "house",
      "lender", "borrower", "applicant", "mortgage", "refinance",
-     "finance", "financial", "financing", "borrow", "borrowing", "borrowed",
+     "finance", "financial", "financing", "financed", "borrow", "borrowing", "borrowed",
      "deposit", "deposits", "debt", "debts", "repay", "repayment",
      "repayments", "repaid", "remortgage", "protection", "insurance",
      "affordability", "collateral", "creditworthiness",
      "verify", "verified", "verification", "job", "jobs",
+     # Correctly-spelled but previously unlisted words that were getting
+     # "corrected" by rapidfuzz into an unrelated, similarly-spelled domain
+     # vocabulary word purely because they weren't recognized as valid on
+     # their own -- e.g. "occupy" (fuzz.ratio against "occupancy" cleared
+     # the 80 threshold) silently became "occupancy" mid-query, and
+     # "financed" became "finance". Both then failed to match the source
+     # document's actual wording ("occupy"/"financing") during relevance
+     # scoring, verified live: "How soon must I occupy a home financed
+     # with an FHA loan?" was silently rewritten to "...occupancy a home
+     # finance with an FHA loan", which no longer matched its own answer.
+     "occupy", "occupied", "occupies", "occupancy", "occupying",
 }
 
 # Phrases that indicate a new question when they start a fragment.
