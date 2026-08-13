@@ -84,3 +84,26 @@ class TestDeathScenarioConcepts:
 
     def test_unrelated_die_usage_not_matched(self):
         assert scenario_concepts_for("the insurance pays out on diagnosis") == []
+
+
+class TestContainsKnownConcept:
+    """Used by multi_question.py to tell a bare noun-phrase list item
+    ("the VA down payment") apart from an incomplete attribute
+    ("income")."""
+
+    def test_single_token_lender_alias(self):
+        assert domain_terms.contains_known_concept("the va down payment")
+
+    def test_multiword_metric_alias(self):
+        assert domain_terms.contains_known_concept("what is the down payment")
+
+    def test_metric_abbreviation(self):
+        assert domain_terms.contains_known_concept("max dti")
+
+    def test_bare_attribute_not_a_known_concept(self):
+        assert not domain_terms.contains_known_concept("income")
+        assert not domain_terms.contains_known_concept("employment")
+
+    def test_empty_text(self):
+        assert not domain_terms.contains_known_concept("")
+        assert not domain_terms.contains_known_concept(None)
