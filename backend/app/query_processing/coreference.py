@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 
 from app.query_processing import entity_extraction as ent
+from app.query_processing import multi_question
 from app.query_processing import pipeline as qp
 
 _PRONOUNS = frozenset(("it", "they", "them", "this", "that", "these", "those"))
@@ -128,8 +129,25 @@ def resolve_references(query: str, history: list[dict] | None) -> str:
     if _is_bare_followup(q):
         plan = qp.process_query(q)
         topic = ent.unique_canonicals(plan.sub_queries[0].entities) if plan.sub_queries else []
-        if not topic:
-            return f"{subject} {q}"
-        return query
+        if topic:
+            return query
+        # A question can name its own topic without matching a specific
+        # domain ENTITY too: "eligibility requirements" isn't a
+        # product/program, but "requirements" is exactly the kind of
+        # self-contained information-request noun multi_question.py
+        # already recognizes for the same reason (see
+        # is_self_contained_request). Without this check, "What are the
+        # eligibility requirements?" asked right after "What documents do
+        # I need to apply?" got the prior turn's *fallback* subject --
+        # no clean canonical entity existed for "documents", so
+        # _subject_of() joined several leftover content words into
+        # "documents need apply" -- prepended onto an unrelated question
+        # it was never asking about. Verified live: the answer became a
+        # bare, item-less teaser sentence ("...documentation ... includes:")
+        # at 55% confidence instead of the DTI/eligibility content the
+        # bare question alone correctly retrieves.
+        if multi_question.is_self_contained_request(q):
+            return query
+        return f"{subject} {q}"
 
     return query
