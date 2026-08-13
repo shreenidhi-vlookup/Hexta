@@ -3,16 +3,29 @@
 RRF is chosen for its simplicity and parameter-free nature on micro-tier
 hardware. Each candidate's final score is:
 
-    score = sum(1 / (k + rank_i))  for each result list i
+    score = sum(weight_i / (k + rank_i))  for each result list i
 
-where k is the RRF constant (default 60) and rank_i is the position
-(1-indexed) of the candidate in list i.
+where k is the RRF constant (default 60), rank_i is the position
+(1-indexed) of the candidate in list i, and weight_i is that list's
+configured weight (ranking/weights_config.py: 0.3 BM25 / 0.7 vector by
+default). The weights exist specifically so vector similarity -- the
+more reliable signal per that config's calibration notes -- gets more
+say than keyword overlap; an earlier version of this function summed
+the two reciprocal ranks unweighted (1:1), silently discarding
+DEFAULT_WEIGHTS and letting a chunk with strong keyword overlap on
+generic recurring words (e.g. "loan" appearing five times) outrank a
+chunk with much better semantic relevance, verified live for "What is
+the minimum down payment for a VA loan?": the one chunk that actually
+answers it ranked #2 on vector similarity but lost to an unrelated
+chunk that merely had more incidental keyword overlap.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Sequence
+
+from app.ranking.weights_config import DEFAULT_WEIGHTS, RankingWeights
 
 
 @dataclass
@@ -41,14 +54,19 @@ def rank_fusion(
     vector_ranked: Sequence[tuple[int, float]],
     chunk_lookup: dict[int, dict],
     k: int = RRF_K,
+    weights: RankingWeights = DEFAULT_WEIGHTS,
 ) -> list[RankedCandidate]:
-    """Fuse two ranked lists using RRF.
+    """Fuse two ranked lists using weighted RRF.
 
     Args:
         bm25_ranked: list of (chunk_id, bm25_score) in descending score order
         vector_ranked: list of (chunk_id, vec_score) in descending score order
         chunk_lookup: dict mapping chunk_id -> chunk metadata dict
         k: RRF constant (higher = flatter curve)
+        weights: per-list weights (ranking/weights_config.py) applied to
+            each list's reciprocal rank before summing -- see module
+            docstring for why this must not default to an unweighted 1:1
+            sum.
 
     Returns:
         List of RankedCandidate sorted by RRF score descending.
@@ -71,7 +89,10 @@ def rank_fusion(
 
     results: list[RankedCandidate] = []
     for cid, r in ranks.items():
-        rrf_score = (1.0 / (k + r["bm25_rank"])) + (1.0 / (k + r["vec_rank"]))
+        rrf_score = (
+            weights.bm25_weight * (1.0 / (k + r["bm25_rank"]))
+            + weights.vector_weight * (1.0 / (k + r["vec_rank"]))
+        )
         meta = chunk_lookup.get(cid, {})
         results.append(RankedCandidate(
             chunk_id=cid,
