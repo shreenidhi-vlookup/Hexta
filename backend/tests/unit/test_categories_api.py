@@ -55,3 +55,44 @@ class TestDepartmentValidation:
     def test_wrong_case_is_rejected(self):
         with pytest.raises(HTTPException):
             _validate_departments("Underwriting", None)
+
+
+class TestMyDocumentsScope:
+    """GET /documents/mine must be scoped by uploader, not merely
+    role-gated: a processor seeing every document would defeat the point of
+    keeping the full list admin-only."""
+
+    def test_query_filters_on_the_calling_user(self):
+        from unittest.mock import MagicMock
+        import asyncio
+
+        from app.api.v1.documents import list_my_documents
+
+        cur = MagicMock()
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
+        cur.fetchall.return_value = []
+        conn = MagicMock()
+        conn.cursor.return_value = cur
+        conn.__enter__ = MagicMock(return_value=conn)
+        conn.__exit__ = MagicMock(return_value=False)
+
+        import app.api.v1.documents as documents_module
+
+        original = documents_module.acquire
+        documents_module.acquire = lambda: conn
+        try:
+            asyncio.run(list_my_documents(user={"id": 5, "role": "processor"}))
+        finally:
+            documents_module.acquire = original
+
+        sql, params = cur.execute.call_args[0]
+        assert "uploaded_by = %s" in sql
+        assert params[0] == 5
+
+    def test_approval_status_is_returned(self):
+        """The UI needs it to show 'Pending review' vs 'Approved'."""
+        from app.api.v1.documents import _DOCUMENT_COLUMNS
+
+        assert "is_approved" in _DOCUMENT_COLUMNS
+        assert "uploaded_by" in _DOCUMENT_COLUMNS

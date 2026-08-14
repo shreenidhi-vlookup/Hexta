@@ -37,6 +37,13 @@ async def list_categories(user: dict = Depends(require_auth)) -> dict:
     return _categories_payload()
 
 
+_DOCUMENT_COLUMNS = (
+    "id, title, source_path, doc_type, department, "
+    "is_active, is_approved, client_id, property_id, case_id, version, "
+    "uploaded_by, created_at"
+)
+
+
 @router.get("/")
 async def list_documents(
     user: dict = Depends(require_auth),
@@ -49,10 +56,41 @@ async def list_documents(
     with acquire() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, title, source_path, doc_type, department, "
-                "is_active, is_approved, client_id, property_id, case_id, version, created_at "
+                f"SELECT {_DOCUMENT_COLUMNS} "
                 "FROM documents ORDER BY created_at DESC LIMIT %s OFFSET %s",
                 (limit, offset),
+            )
+            documents = [dict(row) for row in cur.fetchall()]
+
+    return {"documents": documents}
+
+
+@router.get("/mine")
+async def list_my_documents(
+    user: dict = Depends(require_auth),
+    offset: int = 0,
+    limit: int = 100,
+) -> dict:
+    """List the caller's own uploads, approved or not.
+
+    A processor may upload but not approve, and an unapproved document is
+    invisible everywhere else by design — so without this they would have
+    no way to tell a document still awaiting review from one that failed
+    to ingest, and would go and ask an admin. That is the exact
+    interruption this feature exists to remove.
+
+    Scoped to ``uploaded_by = caller`` rather than role-gated to admin:
+    this returns nothing a processor did not themselves submit.
+    """
+    require_role(user, "processor")
+
+    with acquire() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_DOCUMENT_COLUMNS} "
+                "FROM documents WHERE uploaded_by = %s "
+                "ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (user["id"], limit, offset),
             )
             documents = [dict(row) for row in cur.fetchall()]
 
