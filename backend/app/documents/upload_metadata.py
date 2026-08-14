@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 SIDECAR_SUFFIX = ".meta.json"
 
 # Only these keys are honoured; anything else in the file is ignored.
-_ALLOWED_KEYS = ("doc_type", "department")
+_TEXT_KEYS = ("doc_type", "department")
+_INT_KEYS = ("uploaded_by",)
 
 
 def sidecar_path(document_path: Path) -> Path:
@@ -40,13 +41,20 @@ def write_sidecar(
     document_path: Path,
     doc_type: str | None,
     department: str | None,
+    uploaded_by: int | None = None,
 ) -> Path | None:
-    """Record the admin's category choice. Returns None if there was none."""
-    payload = {
+    """Record the uploader's choices and identity.
+
+    Returns None when there is nothing to record, so an upload that made no
+    choice leaves no file and ingestion detects as it always did.
+    """
+    payload: dict[str, object] = {
         key: value
         for key, value in (("doc_type", doc_type), ("department", department))
         if value
     }
+    if uploaded_by:
+        payload["uploaded_by"] = uploaded_by
     if not payload:
         return None
     path = sidecar_path(document_path)
@@ -54,8 +62,25 @@ def write_sidecar(
     return path
 
 
-def read_sidecar(document_path: Path) -> dict[str, str]:
-    """Read the recorded choice, or ``{}`` when there is none to be had."""
+def _coerce_user_id(value: object) -> int | None:
+    """Positive integer or nothing.
+
+    ``uploaded_by`` lands in a BIGINT column, so a hand-edited sidecar
+    holding a name or a zero must be dropped here rather than failing the
+    whole batch run at INSERT time.
+    """
+    if isinstance(value, bool):  # bool is an int subclass; not a user id
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str) and value.isdigit():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    return None
+
+
+def read_sidecar(document_path: Path) -> dict:
+    """Read the recorded choices, or ``{}`` when there are none to be had."""
     path = sidecar_path(document_path)
     if not path.exists():
         return {}
@@ -67,11 +92,17 @@ def read_sidecar(document_path: Path) -> dict[str, str]:
     if not isinstance(data, dict):
         logger.warning("Ignoring non-object sidecar %s", path.name)
         return {}
-    return {
+
+    parsed: dict = {
         key: data[key]
-        for key in _ALLOWED_KEYS
+        for key in _TEXT_KEYS
         if isinstance(data.get(key), str) and data[key]
     }
+    for key in _INT_KEYS:
+        coerced = _coerce_user_id(data.get(key))
+        if coerced is not None:
+            parsed[key] = coerced
+    return parsed
 
 
 def move_sidecar(document_path: Path, dest_dir: Path) -> None:

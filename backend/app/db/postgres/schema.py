@@ -149,6 +149,11 @@ ALTER_STATEMENTS: list[str] = [
     "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged_by BIGINT REFERENCES users(id)",
     "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ",
+    # Who put this document forward. Processors may upload but only admins
+    # may approve, so the approver needs to see who is asking, and a
+    # processor needs to see the status of their own uploads without being
+    # handed the whole document list.
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by BIGINT REFERENCES users(id)",
     # Two-tier role model: the loan_officer / underwriter / compliance split
     # never diverged in behaviour, so it collapses into a single "processor"
     # tier (auth/rbac.py::STAFF_ROLE_HIERARCHY). Idempotent — re-running
