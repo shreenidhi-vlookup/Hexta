@@ -187,3 +187,100 @@ class TestMinTokensMerge:
         assert len(chunks) > 1
         for c in chunks:
             assert self._chunker()._count_tokens(c.content) <= 50 + 5  # small slack for join boundaries
+
+
+class TestDefinitionEntries:
+    """Regression coverage for the retrieval failure found by auditing a
+    real glossary upload: the chunker correctly emitted one chunk per
+    glossary definition (18 chunks), and then _merge_small_chunks glued
+    seven of them into a single 1341-char blob (4 chunks total), because
+    every definition (23-46 tokens) sits under min_tokens=50.
+
+    The consequence was not a ranking bug but a *retrieval unit* bug:
+    "What is equity?" could only ever retrieve the blob, whose extracted
+    answer phrase was the Amortization definition and whose 600-char
+    excerpt window cut the Equity text off entirely -- scoring 0.0
+    relevance and routing to no_answer even though the answer was
+    indexed. A self-contained "Term: definition" entry is a complete
+    retrieval unit, not the stray fragment the merge pass exists to
+    clean up."""
+
+    def _chunker(self):
+        return StructuralChunker()
+
+    def _extracted(self, text: str) -> ExtractedText:
+        return ExtractedText(text=text, pages=[text], source_format="txt")
+
+    GLOSSARY = (
+        "General Banking and Mortgage Glossary\n\n"
+        "Core Terms\n\n"
+        "Amortization: The process of paying off a loan through regular, "
+        "scheduled payments that cover both principal and interest.\n\n"
+        "Principal: The original sum of money borrowed, or the remaining "
+        "balance owed on a loan, not including interest.\n\n"
+        "Equity: The difference between a property's current market value "
+        "and the outstanding balance owed on any loans.\n\n"
+        "Regulatory Terms\n\n"
+        "Truth in Lending Act (TILA): A federal law requiring lenders to "
+        "disclose key loan terms and costs to borrowers.\n"
+    )
+
+    def test_each_definition_is_its_own_chunk(self):
+        chunks = list(self._chunker().chunk(self._extracted(self.GLOSSARY)))
+        bodies = [c.content for c in chunks]
+        assert len(bodies) == 4, bodies
+        assert bodies[0].startswith("Amortization:")
+        assert bodies[1].startswith("Principal:")
+        assert bodies[2].startswith("Equity:")
+        assert bodies[3].startswith("Truth in Lending Act (TILA):")
+
+    def test_definitions_are_typed_and_not_merged(self):
+        chunks = list(self._chunker().chunk(self._extracted(self.GLOSSARY)))
+        assert all(c.chunk_type == "definition" for c in chunks)
+
+    def test_headings_become_section_metadata_not_chunks(self):
+        chunks = list(self._chunker().chunk(self._extracted(self.GLOSSARY)))
+        sections = [c.section for c in chunks]
+        assert sections == ["Core Terms", "Core Terms", "Core Terms",
+                            "Regulatory Terms"]
+
+    def test_definition_content_is_verbatim(self):
+        """Excerpts are shown to users verbatim, so the chunker must not
+        prepend the section/title to the stored content."""
+        chunks = list(self._chunker().chunk(self._extracted(self.GLOSSARY)))
+        assert chunks[2].content == (
+            "Equity: The difference between a property's current market value "
+            "and the outstanding balance owed on any loans."
+        )
+
+    def test_prose_with_a_mid_sentence_colon_is_not_a_definition(self):
+        """The label must look like a term, not the opening clause of a
+        sentence -- otherwise ordinary prose gets typed as a definition
+        and becomes exempt from the small-chunk merge."""
+        text = "The rule is simple: pay the loan on time every month."
+        chunks = list(self._chunker().chunk(self._extracted(text)))
+        assert [c.chunk_type for c in chunks] == ["paragraph"]
+
+    def test_label_with_no_body_is_not_a_definition(self):
+        """A bare 'Required documents:' line introduces a list; it is a
+        heading, not a self-contained definition."""
+        text = "Required Documents:\n\nSome following paragraph text here."
+        chunks = list(self._chunker().chunk(self._extracted(text)))
+        assert all(c.chunk_type != "definition" for c in chunks)
+
+    def test_ordinary_small_fragments_still_merge(self):
+        """The merge pass must keep doing its original job."""
+        long_para = " ".join(["word"] * 60)
+        chunks = list(self._chunker().chunk(
+            self._extracted(f"{long_para}\n\nshort trailing bit.")
+        ))
+        assert len(chunks) == 1
+
+    def test_table_keeps_enclosing_section(self):
+        text = (
+            "Common ARM Structures\n\n"
+            "| ARM Type | Fixed Period |\n|---|---|\n| 5/1 ARM | 5 years |\n"
+        )
+        chunks = list(self._chunker().chunk(self._extracted(text)))
+        assert [c.chunk_type for c in chunks] == ["table"]
+        assert chunks[0].section == "Common ARM Structures"

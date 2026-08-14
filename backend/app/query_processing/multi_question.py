@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 
 from app.config import settings
-from app.query_processing import domain_terms
+from app.query_processing import corpus_vocab, domain_terms
 
 # Hard boundary, comma-not-inside-number, whitespace-delimited conjunction.
 _BOUNDARY_RE = re.compile(
@@ -98,6 +98,13 @@ def is_self_contained_request(text: str) -> bool:
     # ("down payment", "dti"), a document, a property type -- makes this
     # a concrete, answerable request in itself, not a bare attribute.
     if domain_terms.contains_known_concept(frag):
+        return True
+    # A term the corpus explicitly defines is a complete request too. The
+    # static list above cannot know the vocabulary of documents uploaded
+    # later, so "explain equity and underwriting" stayed one query and
+    # returned whichever definition happened to rank first. Sourcing this
+    # from the corpus makes list decomposition work for any glossary.
+    if corpus_vocab.is_known_concept(frag):
         return True
     return False
 
