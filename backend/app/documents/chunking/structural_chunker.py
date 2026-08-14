@@ -31,6 +31,57 @@ class Chunk:
     summary: str | None = None
 
 
+# --- Definition / glossary entry detection --------------------------------
+#
+# A "Term: definition text" block is a self-contained retrieval unit: it
+# names exactly one concept and answers exactly one question. Treating it
+# as such is what keeps "What is equity?" from having to retrieve a blob
+# that also defines amortization, APR, principal and four other terms.
+#
+# The label has to look like a *term* rather than the opening clause of a
+# sentence, or ordinary prose ("The rule is simple: pay on time") would be
+# typed as a definition and become exempt from the small-chunk merge. The
+# discriminator is title-casing: every word in the label is capitalised,
+# an acronym, a number, or one of the lowercase connectives that appear
+# inside real titles ("Truth in Lending Act", "Real Estate Settlement
+# Procedures Act"). "The rule is simple" fails on "rule".
+_DEFINITION_RE = re.compile(r"^([^\n:]{2,70}):[ \t]+(\S.*)", re.DOTALL)
+
+# Lowercase words allowed inside an otherwise title-cased label.
+_TITLE_CONNECTIVES = frozenset(
+    ("a", "an", "and", "as", "at", "by", "for", "from", "in", "of",
+     "on", "or", "the", "to", "with")
+)
+
+
+def _is_title_like(label: str) -> bool:
+    """True when every word in ``label`` is consistent with a title/term."""
+    words = [w for w in re.split(r"[\s/]+", label.strip()) if w]
+    if not words or len(words) > 8:
+        return False
+    for i, word in enumerate(words):
+        # Strip surrounding punctuation/parentheses: "(APR)" -> "APR".
+        bare = word.strip("()[[]{},.;\"'")
+        if not bare:
+            continue
+        if bare[0].isupper() or bare[0].isdigit():
+            continue
+        # A lowercase connective is fine mid-label, never as the first word.
+        if i > 0 and bare.lower() in _TITLE_CONNECTIVES:
+            continue
+        return False
+    return True
+
+
+def _definition_term(block: str) -> str | None:
+    """Return the defined term if ``block`` is a "Term: definition" entry."""
+    match = _DEFINITION_RE.match(block.strip())
+    if not match:
+        return None
+    label = match.group(1).strip()
+    return label if _is_title_like(label) else None
+
+
 @dataclass
 class StructuralChunker:
     max_tokens: int = 300
@@ -217,6 +268,21 @@ class StructuralChunker:
                 )
                 continue
 
+            # A "Term: definition" line is a complete retrieval unit; keep
+            # it atomic instead of letting it accumulate into `current`
+            # with its neighbours (see _definition_term).
+            if _definition_term(para) is not None:
+                if current:
+                    yield from self._yield_text_chunk(current, section, page_num)
+                    current = []
+                yield Chunk(
+                    content=para,
+                    section=section,
+                    chunk_type="definition",
+                    page_number=page_num,
+                )
+                continue
+
             current.append(para)
             if self._count_tokens("\n".join(current)) >= self.max_tokens:
                 yield from self._yield_text_chunk(current, section, page_num)
@@ -244,13 +310,23 @@ class StructuralChunker:
         """Chunk plain text content (txt, md, docx, html).
 
         Splits on blank lines into logical blocks. Within each block,
-        detects tables, checklists, and splits overly long blocks.
+        detects tables, checklists, definition entries, and splits overly
+        long blocks.
+
+        Standalone heading blocks ("Core Terms", "Regulatory Terms") are
+        consumed into ``section`` metadata rather than emitted as chunks:
+        a two-word heading makes a useless retrieval unit on its own, and
+        as a chunk it was previously swept into the following content by
+        the small-chunk merge. Content is stored verbatim -- the section
+        is never prepended -- because excerpts are shown to users as
+        exact source text.
         """
         text = extracted.text.strip()
         if not text:
             return
 
         blocks = re.split(r"\n\s*\n", text)
+        section: str | None = None
 
         for block in blocks:
             block = block.strip()
@@ -258,7 +334,7 @@ class StructuralChunker:
                 continue
 
             # Check for specialized chunk types
-            table_chunks = list(chunk_table(block, section=None, page_number=None))
+            table_chunks = list(chunk_table(block, section=section, page_number=None))
             if table_chunks:
                 for tc in table_chunks:
                     yield Chunk(
@@ -269,7 +345,7 @@ class StructuralChunker:
                     )
                 continue
 
-            checklist_chunks = list(chunk_checklist(block, section=None, page_number=None))
+            checklist_chunks = list(chunk_checklist(block, section=section, page_number=None))
             if checklist_chunks:
                 for cc in checklist_chunks:
                     yield Chunk(
@@ -283,12 +359,44 @@ class StructuralChunker:
             if self._is_table_block(block):
                 yield Chunk(
                     content=block,
-                    section=None,
+                    section=section,
                     chunk_type="table",
                     page_number=None,
                 )
-            else:
-                yield from self._chunk_text_block(block)
+                continue
+
+            if _definition_term(block) is not None:
+                yield Chunk(
+                    content=block,
+                    section=section,
+                    chunk_type="definition",
+                    page_number=None,
+                )
+                continue
+
+            if self._is_plain_heading(block):
+                section = block
+                continue
+
+            yield from self._chunk_text_block(block, section=section)
+
+    def _is_plain_heading(self, block: str) -> bool:
+        """True for a standalone heading block in plain text.
+
+        Deliberately stricter than ``_is_heading`` (used on PDF lines,
+        where a heading is surrounded by body text on the same page):
+        here a heading must be the *entire* block -- one short, title-like
+        line with no terminal punctuation. That keeps a genuine short
+        sentence ("Short.", "Payments are due monthly.") out, so the
+        small-chunk merge still sees it.
+        """
+        if "\n" in block:
+            return False
+        if len(block) > 80 or len(block.split()) > 10:
+            return False
+        if block[-1] in ".!?:;,":
+            return False
+        return _is_title_like(block)
 
     def _chunk_text_block(
         self,
