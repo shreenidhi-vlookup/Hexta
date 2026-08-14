@@ -530,3 +530,70 @@ class TestValidation:
         assert valid is False
         assert "not approved" in reason
 
+
+
+class TestValidationMirrorsTheSearchFilter:
+    """The post-hoc safety net must enforce the *same* rule as the SQL
+    filter, not an older one.
+
+    Found end-to-end, not by unit tests: after the primary filter moved
+    from department to client ownership, this validator still rejected any
+    chunk outside the user's department. A processor legitimately
+    retrieving an underwriting document had the whole response rejected as
+    an RBAC violation, which search.py turns into an HTTP 500 -- a hard
+    failure where the correct answer was already in hand.
+    """
+
+    def _package(self, *, department="underwriting", client_id=None):
+        from app.response.package_builder import Excerpt, Source
+
+        excerpt = Excerpt(
+            text="Escalations route to the credit committee.",
+            source=Source(
+                chunk_id=1,
+                document_id=1,
+                title="Runbook",
+                section=None,
+                chunk_type="paragraph",
+                department=department,
+                is_approved=True,
+                document_version=1,
+                client_id=client_id,
+            ),
+            confidence=90.0, bm25_score=0.9, vec_score=0.9,
+        )
+        return ResponsePackage(
+            response_id="test", title="Runbook", excerpts=[excerpt],
+            confidence=90.0, routing="answer",
+        )
+
+    PROCESSOR = {"role": "processor", "department": "general", "allowed_departments": []}
+    CLIENT_A = {"role": "client", "department": "general", "client_id": "CLIENT_A"}
+
+    def test_processor_may_read_another_departments_document(self):
+        valid, reason = validate_package(self._package(), self.PROCESSOR)
+        assert valid is True, reason
+
+    def test_processor_may_not_read_a_client_document(self):
+        valid, reason = validate_package(
+            self._package(client_id="CLIENT_A"), self.PROCESSOR
+        )
+        assert valid is False
+        assert "CLIENT_A" in reason
+
+    def test_client_may_read_their_own_document(self):
+        valid, reason = validate_package(
+            self._package(client_id="CLIENT_A"), self.CLIENT_A
+        )
+        assert valid is True, reason
+
+    def test_client_may_not_read_another_clients_document(self):
+        valid, _ = validate_package(
+            self._package(client_id="CLIENT_B"), self.CLIENT_A
+        )
+        assert valid is False
+
+    def test_client_may_not_read_unowned_internal_documents(self):
+        """A client must not inherit the staff open-knowledge rule."""
+        valid, _ = validate_package(self._package(client_id=None), self.CLIENT_A)
+        assert valid is False

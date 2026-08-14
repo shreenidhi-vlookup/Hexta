@@ -189,14 +189,19 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
           <AlertDescription>{result.message}</AlertDescription>
         </Alert>
       )}
+      {/* Both lines below were rewritten when access moved from department
+          to client ownership. The old copy told the user department
+          controlled who could retrieve a document, which is no longer true
+          and is the kind of wrong that gets a document filed in the wrong
+          place on purpose. */}
       <p className="text-xs text-muted-foreground">
-        Department controls who can retrieve this document. Anything other than
-        “General” is visible only to users in that department, plus
-        administrators.
+        Type and department organise the knowledge base — every member of
+        staff can retrieve this document once it is approved.
       </p>
       <p className="text-xs text-muted-foreground">
-        Uploads are restricted to administrators. Supported formats: PDF, DOCX,
-        DOC, TXT, PPT/PPTX, XLS/XLSX, CSV, MD, HTML, RTF.
+        An administrator reviews each upload before it becomes searchable.
+        Supported formats: PDF, DOCX, DOC, TXT, PPT/PPTX, XLS/XLSX, CSV, MD,
+        HTML, RTF.
       </p>
     </div>
   );

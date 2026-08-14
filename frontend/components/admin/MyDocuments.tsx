@@ -38,6 +38,18 @@ export default function MyDocuments() {
     void refresh();
   }, [refresh]);
 
+  /**
+   * Ingestion runs as a detached batch process, so the document row does
+   * not exist yet when the upload request returns — refreshing only on
+   * success shows an empty list and reads as "the upload failed". Re-fetch
+   * a few seconds later so it appears without the user reloading.
+   */
+  const refreshAfterUpload = useCallback(() => {
+    void refresh();
+    const timer = setTimeout(() => void refresh(), 4000);
+    return () => clearTimeout(timer);
+  }, [refresh]);
+
   return (
     <div className="p-6">
       <div className="mx-auto max-w-5xl space-y-6">
@@ -49,7 +61,7 @@ export default function MyDocuments() {
           </p>
         </div>
 
-        <UploadForm onSuccess={refresh} />
+        <UploadForm onSuccess={refreshAfterUpload} />
 
         <div>
           <h3 className="text-sm font-semibold">Your uploads</h3>
