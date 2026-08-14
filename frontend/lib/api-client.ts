@@ -229,6 +229,8 @@ export interface AdminDocument {
   property_id: string | null;
   case_id: string | null;
   version: number;
+  /** User id of the contributor; null for documents ingested by batch. */
+  uploaded_by: number | null;
   created_at: string;
 }
 
@@ -354,6 +356,16 @@ export async function getAdminDocuments(
   token: string
 ): Promise<{ documents: AdminDocument[] }> {
   return adminFetch('/documents/', token);
+}
+
+/**
+ * The caller's own uploads, approved or not. Scoped server-side by
+ * uploaded_by, so a processor sees nothing they did not submit.
+ */
+export async function getMyDocuments(
+  token: string
+): Promise<{ documents: AdminDocument[] }> {
+  return adminFetch('/documents/mine', token);
 }
 
 export async function getAdminAudit(

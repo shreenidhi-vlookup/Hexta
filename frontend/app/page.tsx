@@ -66,6 +66,7 @@ import { Matrix, loader } from "@/components/ui/matrix";
 import { HomeSidebar } from "@/components/nav/HomeSidebar";
 import type { AdminSection } from "@/components/nav/HomeSidebar";
 import { AdminSections } from "@/components/admin/AdminPanel";
+import MyDocuments from "@/components/admin/MyDocuments";
 
 export type NavView = "chat" | AdminSection | "settings" | "help";
 
@@ -810,6 +811,12 @@ export default function HomePage() {
               </ul>
             </div>
           </div>
+        ) : !isAdmin ? (
+          // A processor's only administrative destination is Documents,
+          // and they see their own uploads there rather than the full
+          // admin view (which fetches users, audit and analytics they are
+          // not permitted to read).
+          <MyDocuments />
         ) : (
           <AdminSections active={activeNav as AdminSection} />
         )}
