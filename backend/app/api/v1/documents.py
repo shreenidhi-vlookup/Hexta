@@ -11,8 +11,30 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth.permissions import require_role
 from app.dependencies import require_auth
 from app.db.postgres.session import acquire
+from app.documents import categories
 
 router = APIRouter()
+
+
+def _categories_payload() -> dict:
+    """The category vocabulary, in the shape the upload form needs."""
+    return {
+        "doc_types": categories.as_options(categories.DOC_TYPES),
+        "departments": categories.as_options(categories.DEPARTMENTS),
+        "auto_doc_type": categories.AUTO_DOC_TYPE,
+        "default_department": categories.DEFAULT_DEPARTMENT,
+    }
+
+
+@router.get("/categories")
+async def list_categories(user: dict = Depends(require_auth)) -> dict:
+    """Category vocabulary for the upload form (requires admin role).
+
+    Served rather than duplicated in the frontend so that adding a
+    category stays a backend-only change.
+    """
+    require_role(user, "admin")
+    return _categories_payload()
 
 
 @router.get("/")
