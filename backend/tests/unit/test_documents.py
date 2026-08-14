@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from app.documents import categories
 from app.documents.entity_extraction import extract_entities
 from app.documents.validation import validate_upload
 from app.documents.chunking.structural_chunker import StructuralChunker
 from app.documents.text_extraction import ExtractedText, extract_text
 from app.documents.metadata_extraction import extract_metadata
+
+
 class TestValidation:
     def test_valid_txt_file(self):
         result = validate_upload("doc.txt", 1024)
@@ -287,3 +290,61 @@ class TestAutoIngest:
         assert root.name == "backend"
         assert (root / "app").is_dir()
         assert (root / "app" / "documents" / "ingest_batch.py").exists()
+
+
+class TestMetadataCategoryOverride:
+    """An explicit choice at upload beats content detection.
+
+    Detection reads keywords out of the first 2000 characters, which
+    misfiles anything that merely mentions a category -- the glossary in
+    the knowledge base was typed "underwriting" because one of its
+    definitions uses the word.
+    """
+
+    def _extracted(self, text: str) -> ExtractedText:
+        return ExtractedText(text=text, pages=[text], source_format="txt")
+
+    GLOSSARY = (
+        "General Banking and Mortgage Glossary\n\n"
+        "Underwriting: The process by which a lender evaluates risk.\n"
+    )
+
+    def test_detection_still_applies_without_an_override(self):
+        meta = extract_metadata(self._extracted(self.GLOSSARY), "g.txt")
+        assert meta.doc_type == "underwriting"  # the misfiling, unchanged
+
+    def test_explicit_doc_type_wins(self):
+        meta = extract_metadata(
+            self._extracted(self.GLOSSARY), "g.txt", doc_type="glossary",
+        )
+        assert meta.doc_type == "glossary"
+
+    def test_explicit_department_is_used(self):
+        meta = extract_metadata(
+            self._extracted(self.GLOSSARY), "g.txt", department="compliance",
+        )
+        assert meta.department == "compliance"
+
+    def test_department_defaults_when_absent(self):
+        meta = extract_metadata(self._extracted(self.GLOSSARY), "g.txt")
+        assert meta.department == categories.DEFAULT_DEPARTMENT
+
+    def test_auto_sentinel_falls_back_to_detection(self):
+        meta = extract_metadata(
+            self._extracted(self.GLOSSARY),
+            "g.txt",
+            doc_type=categories.AUTO_DOC_TYPE,
+        )
+        assert meta.doc_type == "underwriting"
+
+    def test_invalid_override_falls_back_rather_than_raising(self):
+        """The endpoint rejects bad values; a hand-edited sidecar must not
+        be able to crash a batch run."""
+        meta = extract_metadata(
+            self._extracted(self.GLOSSARY),
+            "g.txt",
+            doc_type="invoice",
+            department="marketing",
+        )
+        assert meta.doc_type == "underwriting"
+        assert meta.department == categories.DEFAULT_DEPARTMENT

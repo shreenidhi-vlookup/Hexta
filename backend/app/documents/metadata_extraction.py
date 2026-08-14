@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.documents import categories
 from app.documents.text_extraction import ExtractedText
 
 
@@ -41,17 +42,48 @@ _DOC_TYPE_KEYWORDS = {
 
 
 def extract_metadata(
-    extracted: ExtractedText, file_path: str | Path
+    extracted: ExtractedText,
+    file_path: str | Path,
+    doc_type: str | None = None,
+    department: str | None = None,
 ) -> DocumentMetadata:
-    """Infer metadata from file path and initial content lines."""
+    """Infer metadata from file path and initial content lines.
+
+    ``doc_type`` and ``department`` are the admin's explicit choice from
+    the upload form and take precedence over inference — detection reads
+    keywords out of the first 2000 characters, so it misfiles anything
+    that merely mentions a category.
+
+    An unrecognised value falls back rather than raising: the upload
+    endpoint already rejects those, so anything invalid arriving here came
+    from a hand-edited sidecar and must not be able to fail a batch run.
+
+    ``department`` is never inferred — there is nothing in a document's
+    text that reliably says who should be allowed to read it — so it falls
+    back to the default rather than to a guess.
+    """
     path = Path(file_path)
     title = _guess_title(extracted, path)
-    doc_type = _guess_doc_type(extracted)
     source_path = str(path)
+
+    if (
+        doc_type
+        and doc_type != categories.AUTO_DOC_TYPE
+        and categories.is_valid_doc_type(doc_type)
+    ):
+        resolved_type = doc_type
+    else:
+        resolved_type = _guess_doc_type(extracted)
+
+    if department and categories.is_valid_department(department):
+        resolved_department = department
+    else:
+        resolved_department = categories.DEFAULT_DEPARTMENT
 
     return DocumentMetadata(
         title=title,
-        doc_type=doc_type,
+        doc_type=resolved_type,
+        department=resolved_department,
         source_path=source_path,
     )
 
