@@ -1,17 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
-import { createUser } from "@/lib/api-client";
+import {
+  createUser,
+  fetchDocumentCategories,
+  getAdminRoles,
+} from "@/lib/api-client";
 import { getToken } from "@/lib/auth";
 
-const ROLES = ["loan_officer", "admin", "underwriter", "compliance"];
-const DEPARTMENTS = ["general", "compliance", "underwriting"];
+// Roles and departments are served by the backend rather than listed here.
+// Both were hardcoded and both had drifted: the role list still offered
+// loan_officer/underwriter/compliance after the two-tier collapse, and the
+// department list was missing origination and servicing.
+const FALLBACK_ROLE = "processor";
+const FALLBACK_DEPARTMENT = "general";
 
 function parseList(value: string): string[] {
   return value
@@ -25,8 +33,10 @@ export default function CreateUserForm({ onSuccess }: { onSuccess?: () => void }
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [role, setRole] = useState("loan_officer");
-  const [department, setDepartment] = useState("general");
+  const [role, setRole] = useState(FALLBACK_ROLE);
+  const [department, setDepartment] = useState(FALLBACK_DEPARTMENT);
+  const [roles, setRoles] = useState<string[]>([FALLBACK_ROLE]);
+  const [departments, setDepartments] = useState<string[]>([FALLBACK_DEPARTMENT]);
   const [allowedDepts, setAllowedDepts] = useState("");
   const [clientId, setClientId] = useState("");
   const [assignedClients, setAssignedClients] = useState("");
@@ -38,14 +48,24 @@ export default function CreateUserForm({ onSuccess }: { onSuccess?: () => void }
     setEmail("");
     setPassword("");
     setFullName("");
-    setRole("loan_officer");
-    setDepartment("general");
+    setRole(FALLBACK_ROLE);
+    setDepartment(FALLBACK_DEPARTMENT);
     setAllowedDepts("");
     setClientId("");
     setAssignedClients("");
     setAssignedCases("");
     setResult(null);
   };
+
+  useEffect(() => {
+    const token = getToken() ?? "";
+    getAdminRoles(token)
+      .then((r) => setRoles(r.roles))
+      .catch(() => undefined);
+    fetchDocumentCategories(token)
+      .then((c) => setDepartments(c.departments.map((d) => d.value)))
+      .catch(() => undefined);
+  }, []);
 
   const onSubmit = async () => {
     setCreating(true);
@@ -151,7 +171,7 @@ export default function CreateUserForm({ onSuccess }: { onSuccess?: () => void }
             value={role}
             onChange={(e) => setRole(e.target.value)}
           >
-            {ROLES.map((r) => (
+            {roles.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
@@ -168,7 +188,7 @@ export default function CreateUserForm({ onSuccess }: { onSuccess?: () => void }
             value={department}
             onChange={(e) => setDepartment(e.target.value)}
           >
-            {DEPARTMENTS.map((d) => (
+            {departments.map((d) => (
               <option key={d} value={d}>
                 {d}
               </option>
@@ -251,7 +271,7 @@ export default function CreateUserForm({ onSuccess }: { onSuccess?: () => void }
         </Button>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
-        Assigning an elevated role (admin/underwriter/compliance) requires super_admin.
+        Assigning any role above processor requires super_admin.
       </p>
     </div>
   );

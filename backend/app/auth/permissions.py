@@ -9,11 +9,10 @@ from fastapi import HTTPException, status
 
 from app.auth.rbac import CLIENT_ROLES, STAFF_ROLE_HIERARCHY as _HIERARCHY
 
-# _HIERARCHY (super_admin > admin > loan_officer > underwriter > compliance)
-# lives in rbac.py as the single source of truth, alongside ROLE_DEPARTMENTS
-# and CLIENT_ROLES — a module-level assertion there guarantees every role
-# is covered by either the hierarchy or CLIENT_ROLES, so this file can't
-# silently drift out of sync with the rest of the role taxonomy again.
+# _HIERARCHY (super_admin > admin > processor) lives in rbac.py as the
+# single source of truth, alongside CLIENT_ROLES — module-level assertions
+# there keep the staff ladder and the client track disjoint, so this file
+# can't silently drift out of sync with the role taxonomy again.
 #
 # Any role string not present in _HIERARCHY (a typo, or a future role not
 # yet wired in) must be treated the same way as "client": denied, not
@@ -26,7 +25,7 @@ def require_role(user: dict | None, role: str) -> None:
     Fails closed: a client-scoped role, or any role not present in the
     staff hierarchy, is always denied rather than silently admitted.
     """
-    user_role = user.get("role", "loan_officer") if user else "loan_officer"
+    user_role = user.get("role", "processor") if user else "processor"
 
     if user_role in CLIENT_ROLES:
         raise HTTPException(

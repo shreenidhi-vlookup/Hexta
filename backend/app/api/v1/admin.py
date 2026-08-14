@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.hash import bcrypt
 from pydantic import BaseModel
 
+from app.auth import rbac
 from app.auth.permissions import require_role
 from app.dependencies import require_auth
 from app.db.postgres.session import acquire
@@ -42,7 +43,7 @@ class UserCreate(BaseModel):
     email: str
     password: str
     full_name: str | None = None
-    role: str = "loan_officer"
+    role: str = "processor"
     department: str = "general"
     allowed_departments: list[str] = []
     client_id: str | None = None
@@ -63,6 +64,18 @@ class UserUpdate(BaseModel):
     client_id: Optional[str] = None
     assigned_clients: Optional[list[str]] = None
     assigned_cases: Optional[list[str]] = None
+
+
+@router.get("/roles")
+async def list_roles(user: dict = Depends(require_auth)) -> dict:
+    """Assignable staff roles, lowest privilege first.
+
+    Served rather than duplicated in the frontend: the role list was
+    hardcoded in two components, so renaming a role silently left the UI
+    offering one the backend would reject.
+    """
+    require_role(user, "admin")
+    return {"roles": list(rbac.STAFF_ROLE_HIERARCHY)}
 
 
 @router.get("/users")
@@ -90,7 +103,7 @@ async def create_user(
 ) -> dict:
     """Provision a new user account. Requires admin role.
 
-    Assigning an elevated role (anything other than ``loan_officer``) is
+    Assigning an elevated role (anything other than ``processor``) is
     restricted to super_admin; plain admins create users with the default
     role. Passwords are stored as bcrypt hashes.
     """
@@ -98,7 +111,7 @@ async def create_user(
 
     _validate_departments(body.department, body.allowed_departments)
 
-    if body.role != "loan_officer" and user.get("role") != "super_admin":
+    if body.role != "processor" and user.get("role") != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only super_admin may assign elevated roles",
