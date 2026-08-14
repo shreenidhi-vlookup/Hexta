@@ -11,8 +11,29 @@ from pydantic import BaseModel
 from app.auth.permissions import require_role
 from app.dependencies import require_auth
 from app.db.postgres.session import acquire
+from app.documents import categories
 
 router = APIRouter()
+
+
+def _validate_departments(
+    department: str | None,
+    allowed_departments: list[str] | None,
+) -> None:
+    """Reject department values outside the shared vocabulary.
+
+    RBAC compares these strings against ``documents.department`` in SQL,
+    so an unrecognised or mis-cased value does not error -- it silently
+    matches nothing, and the user quietly loses access to documents they
+    should be able to read. Write time is the only place this is visible.
+    """
+    candidates = ([department] if department else []) + list(allowed_departments or [])
+    unknown = [v for v in candidates if not categories.is_valid_department(v)]
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown department(s): {', '.join(unknown)}",
+        )
 
 
 class UserCreate(BaseModel):
@@ -74,6 +95,8 @@ async def create_user(
     role. Passwords are stored as bcrypt hashes.
     """
     require_role(user, "admin")
+
+    _validate_departments(body.department, body.allowed_departments)
 
     if body.role != "loan_officer" and user.get("role") != "super_admin":
         raise HTTPException(
@@ -286,6 +309,10 @@ async def update_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No updatable fields provided",
         )
+
+    _validate_departments(
+        fields.get("department"), fields.get("allowed_departments"),
+    )
 
     set_clause = ", ".join(f"{c} = %s" for c in fields)
     params = list(fields.values())
