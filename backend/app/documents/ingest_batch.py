@@ -31,6 +31,7 @@ from app.documents.entity_extraction import extract_entities
 from app.documents.indexing import index_document
 from app.documents.metadata_extraction import extract_metadata
 from app.documents.summarization import summarize_chunk
+from app.documents import upload_metadata
 from app.documents.text_extraction import extract_text, ExtractedText
 
 logging.basicConfig(level=settings.log_level, format="%(levelname)s %(name)s: %(message)s")
@@ -47,6 +48,10 @@ def _move_to_processed(file_path: Path) -> None:
         logger.info("Moved %s → %s", file_path, dest)
     except FileNotFoundError:
         logger.warning("File already moved: %s", file_path)
+        return
+    # The category sidecar travels with its document, so re-ingesting a
+    # processed file keeps the category it was filed under.
+    upload_metadata.move_sidecar(file_path, processed_dir)
 
 
 def _try_ocr_fallback(file_path: Path, extracted: ExtractedText) -> ExtractedText | None:
@@ -97,12 +102,20 @@ def process_file(file_path: Path) -> bool:
         if ocr_result is not None:
             extracted = ocr_result
 
-    metadata = extract_metadata(extracted, file_path)
+    # The admin's category choice, recorded beside the file at upload.
+    overrides = upload_metadata.read_sidecar(file_path)
+    metadata = extract_metadata(
+        extracted,
+        file_path,
+        doc_type=overrides.get("doc_type"),
+        department=overrides.get("department"),
+    )
     entities = extract_entities(extracted.text)
     logger.info(
-        "Metadata: title=%s, type=%s, %d lenders, %d products",
+        "Metadata: title=%s, type=%s, department=%s, %d lenders, %d products",
         metadata.title,
         metadata.doc_type,
+        metadata.department,
         len(entities.lenders),
         len(entities.products),
     )
