@@ -71,3 +71,19 @@ class TestOptions:
     def test_as_options_preserves_order(self):
         options = categories.as_options(categories.DOC_TYPES)
         assert [o["value"] for o in options] == [c.value for c in categories.DOC_TYPES]
+
+
+class TestInternalHowToTypes:
+    """Staff asking "how do I do X in our CRM" is a documentation need, not
+    a client-data need -- these types make that content first-class."""
+
+    def test_system_guide_is_available(self):
+        assert categories.is_valid_doc_type("system_guide")
+
+    def test_sop_is_available(self):
+        assert categories.is_valid_doc_type("sop")
+
+    def test_both_appear_in_the_served_options(self):
+        values = [o["value"] for o in categories.as_options(categories.DOC_TYPES)]
+        assert "system_guide" in values
+        assert "sop" in values

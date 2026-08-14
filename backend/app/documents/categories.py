@@ -46,6 +46,13 @@ DOC_TYPES: tuple[Category, ...] = (
     Category("eligibility", "Eligibility"),
     Category("compliance", "Compliance"),
     Category("product_guide", "Product guide"),
+    # "How do I assign a case to another adviser?" is one of the most
+    # common things staff currently interrupt an admin to ask, and the
+    # answer is a document, not client data. The vendor's own help centre
+    # sits behind a login, so what belongs here is the firm's own written
+    # process for its tools.
+    Category("system_guide", "System guide (Intelliflo, tools)"),
+    Category("sop", "Internal process / SOP"),
 )
 
 DEPARTMENTS: tuple[Category, ...] = (
