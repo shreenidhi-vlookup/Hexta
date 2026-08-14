@@ -132,3 +132,110 @@ class TestPages:
 
     def test_no_pages_yields_no_pages(self):
         assert clean_ocr_pages([]) == []
+
+
+class TestOcrPageByPage:
+    """ocr_pdf_pages used to call convert_from_path once for the whole
+    document, materialising every page as a PIL image simultaneously --
+    roughly 150-200MB for a 22-page PDF at the 200 DPI default. That
+    survives the 512MB development cap but would very likely OOM against
+    the ~200MB production figure in CLAUDE.md rule 10, inside a detached
+    batch process whose failure surfaces only as a document that never
+    appears.
+    """
+
+    def _stub_pdf2image(self, monkeypatch, pages: int):
+        import sys
+        import types
+
+        calls: list[dict] = []
+
+        module = types.ModuleType("pdf2image")
+
+        def convert_from_path(path, **kwargs):
+            calls.append(kwargs)
+            first = kwargs.get("first_page") or 1
+            last = kwargs.get("last_page") or pages
+            if first > pages:
+                return []
+            return [f"image-{n}" for n in range(first, min(last, pages) + 1)]
+
+        module.convert_from_path = convert_from_path
+        monkeypatch.setitem(sys.modules, "pdf2image", module)
+        return calls
+
+    def _stub_tesseract(self, monkeypatch, fail_on: str | None = None):
+        from app.documents import ocr
+
+        def image_to_string(image):
+            if fail_on is not None and image == fail_on:
+                raise RuntimeError("tesseract exploded")
+            return f"text of {image}"
+
+        # raising=False: pytesseract is an optional dependency, so on a
+        # host without it ocr.py never binds the name at all.
+        monkeypatch.setattr(ocr, "HAS_TESSERACT", True, raising=False)
+        monkeypatch.setattr(
+            ocr,
+            "pytesseract",
+            type("T", (), {"image_to_string": staticmethod(image_to_string)}),
+            raising=False,
+        )
+
+    def test_one_conversion_call_per_page(self, monkeypatch, tmp_path):
+        from app.documents import ocr
+
+        calls = self._stub_pdf2image(monkeypatch, pages=3)
+        self._stub_tesseract(monkeypatch)
+        pdf = tmp_path / "d.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
+
+        pages = ocr.ocr_pdf_pages(pdf)
+
+        assert len(pages) == 3
+        # One call per page, plus a final probe that returns nothing --
+        # discovering the document has ended requires asking for the page
+        # after the last one.
+        assert len(calls) == 4, "pages were not rendered one at a time"
+        assert [c["first_page"] for c in calls] == [1, 2, 3, 4]
+        # The property that actually bounds memory: no single call is ever
+        # allowed to materialise more than one page.
+        assert all(c["first_page"] == c["last_page"] for c in calls)
+
+    def test_renders_at_300_dpi(self, monkeypatch, tmp_path):
+        """200 is marginal for outlined text; 300 is the usual floor."""
+        from app.documents import ocr
+
+        calls = self._stub_pdf2image(monkeypatch, pages=1)
+        self._stub_tesseract(monkeypatch)
+        pdf = tmp_path / "d.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
+
+        ocr.ocr_pdf_pages(pdf)
+        assert calls[0]["dpi"] == 300
+
+    def test_page_cap_is_honoured(self, monkeypatch, tmp_path):
+        """An unbounded loop inside the batch process is a denial of
+        service waiting for a 500-page upload."""
+        from app.documents import ocr
+
+        self._stub_pdf2image(monkeypatch, pages=50)
+        self._stub_tesseract(monkeypatch)
+        pdf = tmp_path / "d.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
+
+        pages = ocr.ocr_pdf_pages(pdf, max_pages=5)
+        assert len(pages) == 5
+
+    def test_one_bad_page_does_not_fail_the_document(self, monkeypatch, tmp_path):
+        from app.documents import ocr
+
+        self._stub_pdf2image(monkeypatch, pages=3)
+        self._stub_tesseract(monkeypatch, fail_on="image-2")
+        pdf = tmp_path / "d.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
+
+        pages = ocr.ocr_pdf_pages(pdf)
+        assert len(pages) == 3
+        assert pages[1] == ""
+        assert "image-1" in pages[0] and "image-3" in pages[2]
