@@ -352,6 +352,16 @@ export async function createUser(
   return response.json();
 }
 
+/**
+ * Assignable staff roles, lowest privilege first. Served by the backend so
+ * a role rename cannot leave the UI offering one the API would reject.
+ */
+export async function getAdminRoles(
+  token: string
+): Promise<{ roles: string[] }> {
+  return adminFetch('/admin/roles', token);
+}
+
 export async function getAdminDocuments(
   token: string
 ): Promise<{ documents: AdminDocument[] }> {

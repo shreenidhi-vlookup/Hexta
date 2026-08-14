@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.hash import bcrypt
 from pydantic import BaseModel
 
+from app.auth import rbac
 from app.auth.permissions import require_role
 from app.dependencies import require_auth
 from app.db.postgres.session import acquire
@@ -63,6 +64,18 @@ class UserUpdate(BaseModel):
     client_id: Optional[str] = None
     assigned_clients: Optional[list[str]] = None
     assigned_cases: Optional[list[str]] = None
+
+
+@router.get("/roles")
+async def list_roles(user: dict = Depends(require_auth)) -> dict:
+    """Assignable staff roles, lowest privilege first.
+
+    Served rather than duplicated in the frontend: the role list was
+    hardcoded in two components, so renaming a role silently left the UI
+    offering one the backend would reject.
+    """
+    require_role(user, "admin")
+    return {"roles": list(rbac.STAFF_ROLE_HIERARCHY)}
 
 
 @router.get("/users")
