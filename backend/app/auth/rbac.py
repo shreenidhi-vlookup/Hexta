@@ -122,54 +122,12 @@ def is_admin(user: dict | None) -> bool:
     return user.get("role") in ADMIN_ROLES
 
 
-def get_search_filter(user: dict | None) -> tuple[str, list[str]]:
-    """Build the RBAC WHERE clause fragment and parameters for search.
-
-    Returns (clause, params). The clause is appended to the SQL query's
-    WHERE clause. If the user is admin, returns ("", []) — no filtering.
-    If the user is a client, filters by d.client_id and department.
-    """
-    if is_admin(user):
-        return "", []
-
-    clauses: list[str] = []
-    params: list[str] = []
-
-    # Client scope: clients only see documents tagged with their client_id.
-    # Authz applied BEFORE retrieval (CLAUDE.md rule #1).
-    client_id = resolve_user_client_id(user)
-    if client_id is not None:
-        clauses.append("d.client_id = %s")
-        params.append(client_id)
-    elif is_client(user):
-        # Client role but no client_id assigned → deny all.
-        return "1=0", []
-
-    departments = resolve_user_departments(user)
-    if not departments:
-        return "1=0", []  # deny all if no departments resolved
-
-    placeholders = ",".join(["%s"] * len(departments))
-    clauses.append(f"d.department = ANY(ARRAY[{placeholders}]::text[])")
-    params.extend(departments)
-
-    # Phase 3b: staff assigned_clients — expand access to specific clients' docs
-    assigned_clients = resolve_user_assigned_clients(user)
-    if assigned_clients:
-        ph = ",".join(["%s"] * len(assigned_clients))
-        clauses.append(
-            f"(d.client_id IS NULL OR d.client_id = ANY(ARRAY[{ph}]::text[]))"
-        )
-        params.extend(assigned_clients)
-
-    # Phase 3b: staff assigned_cases — expand access to specific case docs
-    assigned_cases = resolve_user_assigned_cases(user)
-    if assigned_cases:
-        ph = ",".join(["%s"] * len(assigned_cases))
-        clauses.append(
-            f"(d.case_id IS NULL OR d.case_id = ANY(ARRAY[{ph}]::text[]))"
-        )
-        params.extend(assigned_cases)
-
-    clause = " AND ".join(clauses)
-    return clause, params
+# NOTE: get_search_filter used to live here as well, carrying different
+# rules from the copy in search/metadata_filters.py, and nothing imported
+# it. Two functions that both look authoritative about who may read what
+# is how an access bug hides, so the filter now lives in exactly one
+# place: search/metadata_filters.py (CLAUDE.md rule #1).
+#
+# resolve_user_assigned_clients / resolve_user_assigned_cases above are
+# kept deliberately: they are the scoping primitives client records will
+# need, and they have no behaviour of their own to drift.

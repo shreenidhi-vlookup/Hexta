@@ -58,20 +58,34 @@ class TestQueryParamAlignment:
         query, params = cur.execute.call_args[0]
         assert query.count("%s") == len(params)
 
-    def test_placeholder_count_matches_param_count_with_rbac(self):
+    def test_processor_rbac_clause_reaches_the_query(self):
+        """A processor's clause carries no parameters of its own, so the
+        only evidence it was applied is the SQL text itself."""
         conn, cur = _mock_conn()
         user = {
-            "role": "loan_officer",
+            "role": "processor",
             "department": "general",
-            "allowed_departments": ["compliance"],
+            "allowed_departments": [],
         }
         search_knowledge_base(conn=conn, sub_queries=["credit score"], user=user)
         query, params = cur.execute.call_args[0]
         assert query.count("%s") == len(params)
-        # RBAC params must actually be present in the final params list.
-        scalars = _scalar_params(params)
-        assert "general" in scalars
-        assert "compliance" in scalars
+        assert "d.client_id IS NULL" in query
+
+    def test_placeholder_count_matches_param_count_with_rbac(self):
+        """A client's clause *does* contribute a parameter, which is the
+        case where placeholder/param alignment can actually break."""
+        conn, cur = _mock_conn()
+        user = {
+            "role": "client",
+            "department": "general",
+            "client_id": "CLIENT_A",
+        }
+        search_knowledge_base(conn=conn, sub_queries=["credit score"], user=user)
+        query, params = cur.execute.call_args[0]
+        assert query.count("%s") == len(params)
+        # The RBAC param must actually be present in the final params list.
+        assert "CLIENT_A" in _scalar_params(params)
 
     def test_where_clause_does_not_hard_gate_on_bm25(self):
         """Regression: c.fts @@ to_tsquery(...) must not be an unconditional
