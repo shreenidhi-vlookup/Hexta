@@ -42,7 +42,7 @@ class UserCreate(BaseModel):
     email: str
     password: str
     full_name: str | None = None
-    role: str = "loan_officer"
+    role: str = "processor"
     department: str = "general"
     allowed_departments: list[str] = []
     client_id: str | None = None
@@ -90,7 +90,7 @@ async def create_user(
 ) -> dict:
     """Provision a new user account. Requires admin role.
 
-    Assigning an elevated role (anything other than ``loan_officer``) is
+    Assigning an elevated role (anything other than ``processor``) is
     restricted to super_admin; plain admins create users with the default
     role. Passwords are stored as bcrypt hashes.
     """
@@ -98,7 +98,7 @@ async def create_user(
 
     _validate_departments(body.department, body.allowed_departments)
 
-    if body.role != "loan_officer" and user.get("role") != "super_admin":
+    if body.role != "processor" and user.get("role") != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only super_admin may assign elevated roles",

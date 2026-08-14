@@ -12,41 +12,41 @@ safety net (CLAUDE.md rule #1).
 from __future__ import annotations
 
 
-# Role hierarchy: higher roles inherit lower scopes.
-# Each role maps to the set of departments they can access.
-# "super_admin" can access all departments.
-ROLE_DEPARTMENTS: dict[str, list[str]] = {
-    "super_admin": [],  # empty means "all departments"
-    "admin": [],
-    "loan_officer": ["general"],
-    "underwriter": ["general"],
-    "compliance": ["general"],
-    "client": ["general"],  # scoped to own client_id; department is additional filter
-}
-
 # Default department if none specified.
 DEFAULT_DEPARTMENT: str = "general"
 
-# Roles that bypass department filtering entirely.
+# Roles that bypass RBAC filtering entirely.
 ADMIN_ROLES: set[str] = {"super_admin", "admin"}
 
 # Roles scoped to a single client_id (cannot see other clients' data).
 CLIENT_ROLES: set[str] = {"client"}
 
-# Staff role hierarchy, lowest to highest privilege. This is the single
-# source of truth for auth/permissions.py::require_role — it must stay in
-# sync with ROLE_DEPARTMENTS above. "client" is deliberately excluded: it
-# is a separate, non-staff track (see CLIENT_ROLES) that must never be
-# comparable to the staff ladder, so it is checked independently by
-# require_role rather than being slotted in here.
-STAFF_ROLE_HIERARCHY: list[str] = [
-    "compliance", "underwriter", "loan_officer", "admin", "super_admin",
-]
+# Staff role hierarchy, lowest to highest privilege. Single source of truth
+# for auth/permissions.py::require_role.
+#
+# Two working tiers by design: a *processor* (adviser, case handler) does
+# the day-to-day work and may upload; an *admin* manages the knowledge base
+# and is the only one who can approve an upload into it. The earlier
+# loan_officer / underwriter / compliance split never diverged in behaviour
+# — all three resolved to the same access — so it added ceremony without
+# adding a boundary, and made "who can do what" harder to answer than it
+# needed to be.
+#
+# "client" is deliberately excluded: it is a separate, non-staff track (see
+# CLIENT_ROLES) that must never be comparable to the staff ladder, so
+# require_role checks it independently rather than ranking it here.
+STAFF_ROLE_HIERARCHY: list[str] = ["processor", "admin", "super_admin"]
 
-assert set(STAFF_ROLE_HIERARCHY) | CLIENT_ROLES == set(ROLE_DEPARTMENTS), (
-    "STAFF_ROLE_HIERARCHY + CLIENT_ROLES must cover every role in "
-    "ROLE_DEPARTMENTS — a role missing from both would silently bypass "
-    "require_role() (see auth/permissions.py)."
+assert not (set(STAFF_ROLE_HIERARCHY) & CLIENT_ROLES), (
+    "The staff ladder and the client track must stay disjoint — a role in "
+    "both would be both ranked and denied by require_role(), and which one "
+    "wins would be an accident of check ordering."
+)
+
+assert ADMIN_ROLES <= set(STAFF_ROLE_HIERARCHY), (
+    "Every ADMIN_ROLE must appear in STAFF_ROLE_HIERARCHY: ADMIN_ROLES "
+    "bypasses the search filter, so a role missing from the ladder would "
+    "read everything while failing every require_role() check."
 )
 
 

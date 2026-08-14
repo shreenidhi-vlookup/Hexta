@@ -47,9 +47,9 @@ class TestCreateUser:
         assert exc.value.status_code == 403
 
     def test_non_super_admin_can_create_default_role(self):
-        """Plain admin creating a loan_officer passes the role gate (no 403)."""
+        """Plain admin creating a processor passes the role gate (no 403)."""
         try:
-            _run(_body(role="loan_officer"), _admin(role="admin"))
+            _run(_body(role="processor"), _admin(role="admin"))
         except HTTPException as exc:
             assert exc.status_code != 403
         except Exception:

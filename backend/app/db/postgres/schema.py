@@ -149,6 +149,16 @@ ALTER_STATEMENTS: list[str] = [
     "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged_by BIGINT REFERENCES users(id)",
     "ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ",
+    # Two-tier role model: the loan_officer / underwriter / compliance split
+    # never diverged in behaviour, so it collapses into a single "processor"
+    # tier (auth/rbac.py::STAFF_ROLE_HIERARCHY). Idempotent — re-running
+    # matches nothing once migrated.
+    #
+    # This MUST ship in the same deploy as the hierarchy change: require_role
+    # fails closed, so a new backend against un-migrated rows would 403 every
+    # staff request.
+    "UPDATE users SET role = 'processor' "
+    "WHERE role IN ('loan_officer', 'underwriter', 'compliance')",
 ]
 
 # Index for client-scored retrieval (Phase 3a).
