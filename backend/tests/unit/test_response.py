@@ -529,3 +529,4 @@ class TestValidation:
         valid, reason = validate_package(package, user=None)
         assert valid is False
         assert "not approved" in reason
+
