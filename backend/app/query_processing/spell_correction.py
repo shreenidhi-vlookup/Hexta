@@ -23,7 +23,7 @@ import re
 
 from rapidfuzz import fuzz, process
 
-from app.query_processing import domain_terms
+from app.query_processing import corpus_vocab, domain_terms
 
 _MIN_TOKEN_LEN_FOR_CORRECTION = 4
 # Strong-match threshold. Below this the candidate is too different to
@@ -113,6 +113,14 @@ def _is_protected(token: str) -> bool:
         return True  # contains digits / symbols / $ / % etc.
     if token in _VOCAB_SET:
         return True
+    # A token that occurs in the indexed corpus is a real term in this
+    # deployment's domain, not a typo -- even when it is absent from the
+    # static lists above. Without this, an entity specific to the user's
+    # documents can be fuzzy-matched into an unrelated dictionary word
+    # ("respa" -> "repay" at exactly the 80.0 threshold), which rewrites
+    # the query before any search runs. See corpus_vocab.
+    if token in corpus_vocab.active_vocabulary():
+        return True
     # Protect common English plurals: if dropping a trailing "s" yields
     # a known word, treat the plural as protected too.
     if len(token) > 4 and token.endswith("s") and token[:-1] in _VOCAB_SET:
@@ -120,6 +128,23 @@ def _is_protected(token: str) -> bool:
     if len(token) < _MIN_TOKEN_LEN_FOR_CORRECTION:
         return True
     return False
+
+
+def _edit_is_plausible(token: str, candidate: str) -> bool:
+    """Reject "corrections" that change the word rather than repair it.
+
+    A typo is a substitution/transposition/dropped character, so a real
+    fix stays close to the original *length*. A candidate that bolts a
+    whole morpheme on ("paid" → "repaid", "finance" → "refinance") is a
+    different word that happens to score well: both sit right at the 80.0
+    acceptance threshold, since a short token shares most of its
+    characters with its own prefixed form.
+
+    Allowing one character of slack (more for longer tokens, where a
+    dropped syllable is a plausible typo) keeps genuine repairs like
+    "credt" → "credit" and "investmnt" → "investment" working.
+    """
+    return abs(len(candidate) - len(token)) <= max(1, len(token) // 4)
 
 
 def _split_glued(token: str) -> str | None:
@@ -170,6 +195,8 @@ def _correct_token(token: str, neighbors: set[str] | None = None) -> str:
     best: str | None = None
     best_eff = -1.0
     for cand, score, _ in matches:
+        if not _edit_is_plausible(token, cand):
+            continue
         bonus = _CONTEXT_BONUS if _context_pairs(cand, neighbors) else 0.0
         effective = score + bonus
         if effective < _RATIO_THRESHOLD:
@@ -177,6 +204,31 @@ def _correct_token(token: str, neighbors: set[str] | None = None) -> str:
         if effective > best_eff:
             best, best_eff = cand, effective
     return best if best is not None else token
+
+
+def _phrase_edit_is_plausible(window: list[str], alias_tokens: list[str]) -> bool:
+    """True when rewriting ``window`` to ``alias_tokens`` only repairs typos.
+
+    Whole-window fuzzy matching is blind to *which* word changed, so a
+    high score can hide a rewrite that inserts meaning rather than fixing
+    a spelling: "a loan" scores 92.3 against the alias "va loan" (over the
+    92 threshold) purely because five of six characters line up, and the
+    replacement silently turns a generic question into a VA-loan question.
+
+    A token the token-level pass refuses to touch (an article, an
+    acronym, a number) must not be rewritable by the phrase pass either --
+    protection has to hold at every level or it is not protection. Tokens
+    that are eligible for correction still have to look like typo repairs
+    of their counterparts.
+    """
+    for original, replacement in zip(window, alias_tokens):
+        if original == replacement:
+            continue
+        if _is_protected(original):
+            return False
+        if not _edit_is_plausible(original, replacement):
+            return False
+    return True
 
 
 def _correct_multiword_phrases(text: str) -> str:
@@ -209,6 +261,8 @@ def _correct_multiword_phrases(text: str) -> str:
                 if window == alias or window in _MULTIWORD_VOCAB:
                     for pos in range(i, i + n):
                         used_positions.add(pos)
+                    continue
+                if not _phrase_edit_is_plausible(tokens[i : i + n], alias_tokens):
                     continue
                 if fuzz.ratio(window, alias) >= _PHRASE_RATIO_THRESHOLD:
                     tokens[i : i + n] = alias_tokens

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from app.query_processing import domain_terms
+from app.query_processing import corpus_vocab, domain_terms
 
 # Minimal stopwords dropped from a query when computing relevance. Kept
 # intentionally small so meaningful domain words ("employment", "income",
@@ -31,6 +31,11 @@ _RELEVANCE_STOP = frozenset((
     # had to contain, penalizing relevance for no reason.
     "have", "has", "had", "do", "does", "did", "can", "could",
     "will", "would", "should", "may", "might", "must", "i",
+    # Relative pronouns / determiners: pure grammatical glue. They were
+    # being scored as content terms the answer had to contain, which both
+    # inflates the denominator and (once corpus filtering arrived) counts
+    # as "supported", since documents obviously contain the word "that".
+    "that", "this", "these", "those", "which", "who", "whom", "whose",
 ))
 
 
@@ -137,6 +142,39 @@ def term_present(term: str, hay: str) -> bool:
     return any(c in hay for c in candidates)
 
 
+def corpus_supported_groups(groups: list[set[str]]) -> list[set[str]]:
+    """Drop term groups no document in the corpus contains.
+
+    A query term that appears nowhere in the knowledge base cannot be
+    evidence for or against any answer -- yet as a denominator entry it
+    silently *requires* the answer to contain it. Paraphrases are made
+    almost entirely of such words: "Which loan type has a payment that
+    never changes?" asks for six concepts, but "never" and "changes" are
+    not in any document, so the correct Fixed-Rate Mortgage definition
+    could score at most 4/6 no matter how perfectly it answered. It
+    scored 2/6 = 0.333, just under the 0.35 no-answer floor, and a right
+    answer was suppressed.
+
+    This is the standard intuition that a term's weight should reflect
+    how much it can discriminate, applied to the one case where the
+    weight is unambiguous: zero corpus occurrences, zero weight.
+
+    Two deliberate conservatisms. The filter is skipped entirely when the
+    vocabulary has not been loaded, and when *every* group would be
+    dropped -- a query sharing no vocabulary at all with the corpus is
+    strong evidence of no answer, and collapsing it to a vacuous 1.0
+    would invert that.
+    """
+    vocab = corpus_vocab.active_vocabulary()
+    if not vocab:
+        return groups
+    supported = [
+        g for g in groups
+        if any(c in vocab for t in g for c in term_stem_candidates(t))
+    ]
+    return supported or groups
+
+
 def relevance_factor(question: str, answer_text: str) -> float:
     """Fraction of the query's content *concepts* present in the answer, in [0,1].
 
@@ -148,7 +186,7 @@ def relevance_factor(question: str, answer_text: str) -> float:
     concept satisfied by either form, instead of the answer needing to
     contain every word of the expansion on top of the abbreviation.
     """
-    groups = content_term_groups(question)
+    groups = corpus_supported_groups(content_term_groups(question))
     if not groups:
         return 1.0
     hay = (answer_text or "").lower()

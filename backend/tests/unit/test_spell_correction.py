@@ -301,3 +301,39 @@ def _run_with_timeout(func, timeout: int = 5) -> str:
         raise exception[0]
 
     return result[0]
+
+
+class TestEditSizeLimit:
+    """Regression: a "correction" that merely bolts a prefix onto a real
+    word is not a typo fix, it is a different word.
+
+    Found by auditing a paraphrase query: "How does a loan gradually get
+    paid off?" was rewritten to "...get repaid off" ("paid" -> "repaid"
+    scores exactly 80.0, the acceptance threshold), and separately
+    "a loan" -> "va loan" (92.3 against the 92 phrase threshold) injected
+    a VA-loan entity into a question that never mentioned VA. Both pushed
+    retrieval away from the Amortization definition that answers it.
+
+    The same shape was patched once before for finance -> refinance by
+    adding "finance" to the vocabulary; capping the edit size fixes the
+    whole class rather than one word at a time.
+    """
+
+    def test_paid_not_extended_to_repaid(self):
+        assert correct("how does a loan gradually get paid off") == (
+            "how does a loan gradually get paid off"
+        )
+
+    def test_article_not_absorbed_into_alias(self):
+        """Phrase repair must not rewrite a protected token -- "a" is too
+        short to be correctable on its own, so "a loan" must not become
+        "va loan"."""
+        assert "va loan" not in correct("how does a loan get paid off")
+
+    def test_finance_not_extended_to_refinance(self):
+        assert "refinance" not in correct("how does bridging finance work")
+
+    def test_genuine_typos_still_fixed(self):
+        assert "income" in correct("inocme requirements")
+        assert "credit" in correct("minimum credt score")
+        assert "investment" in correct("max ltv for investmnt properti")

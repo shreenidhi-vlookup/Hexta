@@ -585,6 +585,23 @@ def build_response_package(
     # that bag-of-words scoring can't -- see _query_phrases.
     query_phrases = _query_phrases(query_text)
 
+    # Note (measured, kept deliberately): re-sorting excerpts by word
+    # overlap here can override the retrieval ranking, which is the
+    # stronger signal in principle -- for "What portion of a mortgage
+    # represents the amount I still owe excluding interest?" it promotes
+    # the Fixed-Rate Mortgage definition (overlap 0.50, it repeats
+    # "mortgage" and "interest") over Principal (0.25), which both RRF and
+    # the cross-encoder rank first and which is the correct answer.
+    #
+    # Making retrieval order authoritative here was tried and measured on
+    # the 52-case regression matrix: it did not fix that query (Principal's
+    # 0.25 overlap then falls under the no-answer floor downstream) and it
+    # broke "Which loan type has a payment that never changes?", where the
+    # cross-encoder ranks ARM above Fixed-Rate and this re-sort is what
+    # currently recovers the right answer. Net -2 cases, so it was
+    # reverted. The re-sort is compensating for cross-encoder ranking
+    # errors; removing it needs a better top-1 ranker first, not a
+    # different tie-break.
     def _phrase_rank(e: Excerpt) -> tuple:
         rel = round(relevance_factor(query_text, e.text), 2)
         hits = _phrase_hits(e.text, query_phrases)
