@@ -36,15 +36,15 @@ class TestMetadataFilters:
         assert clause == ""
         assert params == []
 
-    def test_loan_officer_filters_departments(self):
+    def test_processor_filters_by_client_ownership_not_department(self):
         clause, params = get_search_filter({
-            "role": "loan_officer",
+            "role": "processor",
             "department": "general",
             "allowed_departments": ["compliance"],
         })
-        assert "department" in clause
-        assert "general" in params
-        assert "compliance" in params
+        assert clause == "d.client_id IS NULL"
+        assert "department" not in clause
+        assert params == []
 
     def test_no_user_denies_all(self):
         """When user is None (unauthenticated), the RBAC filter must

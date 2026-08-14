@@ -162,25 +162,27 @@ class TestRBAC:
         assert is_admin(user) is False
 
     def test_get_search_filter_admin(self):
-        from app.auth.rbac import get_search_filter
+        from app.search.metadata_filters import get_search_filter
 
         user = {"role": "super_admin", "department": "general"}
         clause, params = get_search_filter(user)
         assert clause == ""
         assert params == []
 
-    def test_get_search_filter_loan_officer(self):
-        from app.auth.rbac import get_search_filter
+    def test_get_search_filter_processor(self):
+        """The filter lives only in metadata_filters now; rbac.py's copy
+        was deleted. A processor is bounded by client ownership rather than
+        department."""
+        from app.search.metadata_filters import get_search_filter
 
         user = {
-            "role": "loan_officer",
+            "role": "processor",
             "department": "general",
             "allowed_departments": ["compliance"],
         }
         clause, params = get_search_filter(user)
-        assert "department" in clause
-        assert "general" in params
-        assert "compliance" in params
+        assert clause == "d.client_id IS NULL"
+        assert params == []
 
 
 class TestEndpoints:

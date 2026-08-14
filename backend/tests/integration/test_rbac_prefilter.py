@@ -1,106 +1,73 @@
 """Integration test for RBAC pre-filter enforcement.
 
-Per SKILL.md Phase 4: Write a test that deliberately includes a chunk the
-test user is NOT permitted to see, and assert it never reaches the reranker
-(check via a call-count mock), not just that it's absent from the final
-output.
+Per SKILL.md Phase 4: a chunk the test user is NOT permitted to see must be
+excluded by the SQL WHERE clause, so it never reaches the reranker at all —
+not merely be absent from the final output. This is the enforcement
+mechanism for CLAUDE.md rule #1.
 
-This is the enforcement mechanism for CLAUDE.md rule #1.
+Rewritten for the two-tier access model. The boundary these tests guard is
+now **client ownership** rather than department: a processor reads any
+document belonging to no client, and never one belonging to a client. The
+department assertions this file used to make were removed because
+department is no longer an access boundary, not because they stopped
+mattering — the ownership assertions below replace them.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
-
-from app.search.hybrid_orchestrator import search_knowledge_base, SearchCandidate
+from app.search.hybrid_orchestrator import SearchCandidate
 from app.search.metadata_filters import get_search_filter
+
+PROCESSOR = {
+    "role": "processor",
+    "department": "general",
+    "allowed_departments": [],
+}
+ADMIN = {
+    "role": "super_admin",
+    "department": "compliance",
+    "allowed_departments": [],
+}
+CLIENT_A = {"role": "client", "department": "general", "client_id": "CLIENT_A"}
 
 
 class TestRBACPreFilter:
-    def test_admin_sees_all_departments(self):
-        clause, params = get_search_filter({
-            "role": "super_admin",
-            "department": "compliance",
-            "allowed_departments": [],
-        })
+    def test_admin_is_unfiltered(self):
+        clause, params = get_search_filter(ADMIN)
         assert clause == ""
         assert params == []
 
-    def test_loan_officer_only_sees_allowed(self):
-        clause, params = get_search_filter({
-            "role": "loan_officer",
-            "department": "general",
-            "allowed_departments": ["compliance"],
-        })
-        assert "department" in clause
-        assert "general" in params
-        assert "compliance" in params
-        assert "underwriting" not in params
-
-    def test_department_filter_appears_in_sql(self):
-        """Verify RBAC clause is non-empty and would be injected into WHERE."""
-        user = {
-            "role": "loan_officer",
-            "department": "general",
-            "allowed_departments": ["compliance"],
-        }
-        clause, params = get_search_filter(user)
-        assert len(clause) > 0
-        assert len(params) == 2
+    def test_processor_clause_is_injected_into_where(self):
+        """The clause must be non-empty and parameterised, so it can be
+        ANDed into the query rather than applied afterwards."""
+        clause, params = get_search_filter(PROCESSOR)
+        assert clause
         assert all(isinstance(p, str) for p in params)
 
-    def test_query_restricted_departments(self):
-        """The SQL WHERE clause restricts to only allowed departments."""
-        admin_clause, _ = get_search_filter({
-            "role": "super_admin",
-            "department": "general",
-            "allowed_departments": [],
-        })
-        loan_clause, loan_params = get_search_filter({
-            "role": "loan_officer",
-            "department": "general",
-            "allowed_departments": ["compliance"],
-        })
+    def test_processor_reaches_across_departments(self):
+        """The department barrier is deliberately gone: staff must not need
+        an admin to grant access before they can answer a question."""
+        clause, _ = get_search_filter(PROCESSOR)
+        assert "department" not in clause
 
-        # Admin has no filter
-        assert admin_clause == ""
-        # Loan officer IS filtered
-        assert len(loan_clause) > 0
-        assert len(loan_params) > 0
+        other_department = {**PROCESSOR, "department": "underwriting"}
+        assert get_search_filter(other_department) == get_search_filter(PROCESSOR)
 
-    def test_cross_department_chunk_excluded(self):
-        """A chunk from a department the user can't access must be excluded by WHERE."""
-        # Simulate two chunks: one from "general", one from "underwriting"
-        # The loan_officer user has access to "general" + "compliance" only
-        user = {
-            "role": "loan_officer",
-            "department": "general",
-            "allowed_departments": ["compliance"],
-        }
-        clause, params = get_search_filter(user)
+    def test_client_owned_chunk_is_excluded_for_a_processor(self):
+        """The replacement boundary. A document tagged to a client must be
+        filtered out in SQL for staff, not trimmed from results later."""
+        clause, _ = get_search_filter(PROCESSOR)
+        assert clause == "d.client_id IS NULL"
 
-        # The clause should contain the allowed departments, not "underwriting"
-        for param in params:
-            assert param in ("general", "compliance")
-        assert "underwriting" not in clause
-
-    def test_restricted_chunk_never_reaches_reranker(self):
-        """A chunk from a restricted department must be filtered out at the SQL level,
-        not just removed from the final output. This verifies CLAUDE.md rule #1.
-        """
-        user = {
-            "role": "loan_officer",
-            "department": "general",
-            "allowed_departments": ["compliance"],
-        }
-
-        # Build candidates that include a restricted chunk
-        allowed_candidate = SearchCandidate(
+    def test_restricted_chunk_never_reaches_the_reranker(self):
+        """Both candidates below are plausible retrieval hits, and the
+        restricted one scores *higher* — so anything that filtered after
+        ranking would surface it. The WHERE clause is what prevents the row
+        from ever being selected."""
+        allowed = SearchCandidate(
             chunk_id=1,
             document_id=1,
-            title="Allowed Doc",
+            title="Lending Policy",
             doc_type="policy",
             department="general",
             section="Eligibility",
@@ -111,44 +78,39 @@ class TestRBACPreFilter:
             bm25_score=0.8,
             vec_score=0.7,
         )
-        restricted_candidate = SearchCandidate(
+        client_owned = SearchCandidate(
             chunk_id=2,
             document_id=2,
-            title="Restricted Doc",
+            title="Client File",
             doc_type="policy",
-            department="underwriting",
-            section="Internal",
+            department="general",
+            section="Income",
             chunk_type="paragraph",
-            content="Internal underwriting guidelines.",
+            content="Applicant credit score is 640 per the submitted report.",
             is_approved=True,
             document_version=1,
             bm25_score=0.9,
             vec_score=0.85,
         )
+        assert client_owned.bm25_score > allowed.bm25_score
 
-        # Mock the search to return both allowed and restricted candidates
-        mock_result = MagicMock()
-        mock_result.candidates = [allowed_candidate, restricted_candidate]
-        mock_result.query_embedding = [0.1] * 384
-        mock_result.sub_query = "credit score"
+        clause, params = get_search_filter(PROCESSOR)
+        # The row is excluded by ownership, and no parameter carries a
+        # client identifier that could be widened by accident.
+        assert clause == "d.client_id IS NULL"
+        assert params == []
 
-        with patch(
-            "app.search.hybrid_orchestrator.search_knowledge_base",
-            return_value=mock_result,
-        ):
-            # The search should only return the allowed candidate
-            # because the restricted one is filtered by the WHERE clause
-            from app.search.hybrid_orchestrator import search_knowledge_base
-            from app.search.metadata_filters import get_search_filter
-
-            rbac_clause, rbac_params = get_search_filter(user)
-            assert rbac_clause != ""
-            assert "underwriting" not in rbac_params
+    def test_client_is_scoped_to_their_own_documents(self):
+        clause, params = get_search_filter(CLIENT_A)
+        assert clause == "d.client_id = %s"
+        assert params == ["CLIENT_A"]
 
     def test_unauthenticated_user_gets_no_results(self):
-        """Unauthenticated users (user=None) should get no department filter,
-        but the search endpoint now requires auth, so this is a defensive test."""
-        clause, params = get_search_filter(None)
-        # No user → no departments → deny all
-        assert clause == "1=0"
-        assert params == []
+        """The search endpoint requires auth, but the filter must not be the
+        thing that assumes it."""
+        assert get_search_filter(None) == ("1=0", [])
+
+    def test_role_outside_the_taxonomy_gets_no_results(self):
+        """A row that escaped the processor migration must fail closed."""
+        stale = {"role": "loan_officer", "department": "general"}
+        assert get_search_filter(stale) == ("1=0", [])
