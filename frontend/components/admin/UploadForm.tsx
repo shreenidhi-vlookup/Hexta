@@ -1,13 +1,24 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Upload, X } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
-import { uploadDocument } from "@/lib/api-client";
+import {
+  fetchDocumentCategories,
+  uploadDocument,
+  type DocumentCategories,
+} from "@/lib/api-client";
 import { getToken } from "@/lib/auth";
 
 export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
@@ -16,7 +27,24 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
   );
+  // Rendered from the backend vocabulary rather than a local copy, so a
+  // new category needs no frontend change. Null means the lookup failed;
+  // the form still uploads, and the backend applies its own defaults.
+  const [categories, setCategories] = useState<DocumentCategories | null>(null);
+  const [docType, setDocType] = useState("");
+  const [department, setDepartment] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const token = getToken() ?? "";
+    fetchDocumentCategories(token)
+      .then((c) => {
+        setCategories(c);
+        setDocType(c.auto_doc_type);
+        setDepartment(c.default_department);
+      })
+      .catch(() => setCategories(null));
+  }, []);
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setResult(null);
@@ -33,7 +61,11 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
     setResult(null);
     try {
       const token = getToken() ?? "";
-      const res = await uploadDocument(file, token);
+      const res = await uploadDocument(
+        file,
+        token,
+        categories ? { docType, department } : undefined,
+      );
       setResult({
         ok: true,
         message: res.indexing
@@ -55,6 +87,64 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
 
   return (
     <div className="space-y-3">
+      {categories && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <Label
+              htmlFor="doc-type"
+              className="text-xs uppercase tracking-wide text-muted-foreground"
+            >
+              Document type
+            </Label>
+            <Select
+              value={docType}
+              onValueChange={setDocType}
+              disabled={uploading}
+            >
+              <SelectTrigger id="doc-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {/* Detection stays available and is labelled, so its
+                    behaviour is visible rather than implied. */}
+                <SelectItem value={categories.auto_doc_type}>
+                  Auto-detect from content
+                </SelectItem>
+                {categories.doc_types.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label
+              htmlFor="doc-department"
+              className="text-xs uppercase tracking-wide text-muted-foreground"
+            >
+              Department
+            </Label>
+            <Select
+              value={department}
+              onValueChange={setDepartment}
+              disabled={uploading}
+            >
+              <SelectTrigger id="doc-department">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {categories.departments.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-end gap-3">
         <div className="flex-1">
           <Label htmlFor="doc-file" className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -99,6 +189,11 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
           <AlertDescription>{result.message}</AlertDescription>
         </Alert>
       )}
+      <p className="text-xs text-muted-foreground">
+        Department controls who can retrieve this document. Anything other than
+        “General” is visible only to users in that department, plus
+        administrators.
+      </p>
       <p className="text-xs text-muted-foreground">
         Uploads are restricted to administrators. Supported formats: PDF, DOCX,
         DOC, TXT, PPT/PPTX, XLS/XLSX, CSV, MD, HTML, RTF.
