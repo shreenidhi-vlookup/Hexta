@@ -47,6 +47,13 @@ const ADMIN_ITEMS: NavItem[] = [
   { key: "gaps", label: "Knowledge gaps", icon: AlertTriangle },
 ];
 
+// A processor may contribute documents but manages nothing, so Documents
+// is the only administrative destination they get. Everything else in
+// ADMIN_ITEMS is management or oversight and stays admin-only.
+const PROCESSOR_ITEMS: NavItem[] = [
+  { key: "documents", label: "Documents", icon: FileText },
+];
+
 const FOOTER_ITEMS: NavItem[] = [
   { key: "settings", label: "Settings", icon: Settings },
   { key: "help", label: "Help", icon: HelpCircle },
@@ -77,7 +84,7 @@ export function HomeSidebar({
   onSelectRecent,
   onDeleteRecent,
 }: HomeSidebarProps) {
-  const visibleAdmin = isAdmin ? ADMIN_ITEMS : [];
+  const visibleAdmin = isAdmin ? ADMIN_ITEMS : PROCESSOR_ITEMS;
 
   const chatClick = (item: NavItem) => {
     if (item.label === "New chat") onNewChat();

@@ -55,3 +55,86 @@ class TestDepartmentValidation:
     def test_wrong_case_is_rejected(self):
         with pytest.raises(HTTPException):
             _validate_departments("Underwriting", None)
+
+
+class TestMyDocumentsScope:
+    """GET /documents/mine must be scoped by uploader, not merely
+    role-gated: a processor seeing every document would defeat the point of
+    keeping the full list admin-only."""
+
+    def test_query_filters_on_the_calling_user(self):
+        from unittest.mock import MagicMock
+        import asyncio
+
+        from app.api.v1.documents import list_my_documents
+
+        cur = MagicMock()
+        cur.__enter__ = MagicMock(return_value=cur)
+        cur.__exit__ = MagicMock(return_value=False)
+        cur.fetchall.return_value = []
+        conn = MagicMock()
+        conn.cursor.return_value = cur
+        conn.__enter__ = MagicMock(return_value=conn)
+        conn.__exit__ = MagicMock(return_value=False)
+
+        import app.api.v1.documents as documents_module
+
+        original = documents_module.acquire
+        documents_module.acquire = lambda: conn
+        try:
+            asyncio.run(list_my_documents(user={"id": 5, "role": "processor"}))
+        finally:
+            documents_module.acquire = original
+
+        sql, params = cur.execute.call_args[0]
+        assert "uploaded_by = %s" in sql
+        assert params[0] == 5
+
+    def test_approval_status_is_returned(self):
+        """The UI needs it to show 'Pending review' vs 'Approved'."""
+        from app.api.v1.documents import _DOCUMENT_COLUMNS
+
+        assert "is_approved" in _DOCUMENT_COLUMNS
+        assert "uploaded_by" in _DOCUMENT_COLUMNS
+
+
+class TestRolesEndpoint:
+    """The role list was hardcoded in two frontend components, so renaming
+    a role left the UI offering one the backend would reject."""
+
+    def test_roles_come_from_the_shared_hierarchy(self):
+        import asyncio
+
+        from app.api.v1.admin import list_roles
+        from app.auth import rbac
+
+        result = asyncio.run(list_roles(user={"role": "admin"}))
+        assert result["roles"] == list(rbac.STAFF_ROLE_HIERARCHY)
+
+    def test_processor_is_offered(self):
+        import asyncio
+
+        from app.api.v1.admin import list_roles
+
+        assert "processor" in asyncio.run(list_roles(user={"role": "admin"}))["roles"]
+
+    def test_retired_roles_are_not_offered(self):
+        import asyncio
+
+        from app.api.v1.admin import list_roles
+
+        roles = asyncio.run(list_roles(user={"role": "admin"}))["roles"]
+        for retired in ("loan_officer", "underwriter", "compliance"):
+            assert retired not in roles
+
+    def test_requires_admin(self):
+        import asyncio
+
+        import pytest as _pytest
+        from fastapi import HTTPException
+
+        from app.api.v1.admin import list_roles
+
+        with _pytest.raises(HTTPException) as exc:
+            asyncio.run(list_roles(user={"role": "processor"}))
+        assert exc.value.status_code == 403
