@@ -67,8 +67,14 @@ async def upload_document(
     at ingest, and an absent department falls back to the default.
 
     Returns immediately — ingestion happens in a separate batch process.
+
+    Open to processors, not just admins: staff being unable to contribute
+    what they know is the bottleneck this is meant to remove. The gate is
+    approval, not upload — ingestion writes ``is_approved = false`` and the
+    version filter requires true, so nothing an upload adds is retrievable
+    (by anyone, including its uploader) until an admin approves it.
     """
-    require_role(user, "admin")
+    require_role(user, "processor")
 
     # Before the file is read, so a bad category costs nothing.
     resolved_type, resolved_department = _resolve_category(doc_type, department)
@@ -104,7 +110,9 @@ async def upload_document(
 
     # Recorded beside the file so the batch ingester (a separate process)
     # can pick it up; the handler itself still never ingests.
-    upload_metadata.write_sidecar(dest, resolved_type, resolved_department)
+    upload_metadata.write_sidecar(
+        dest, resolved_type, resolved_department, uploaded_by=user.get("id"),
+    )
 
     indexed = trigger_ingestion(pending_dir)
 

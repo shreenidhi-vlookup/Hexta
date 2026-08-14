@@ -37,6 +37,7 @@ def index_document(
     client_id: str | None = None,
     property_id: str | None = None,
     case_id: str | None = None,
+    uploaded_by: int | None = None,
 ) -> IndexResult:
     """Insert a document and its chunks into Postgres.
 
@@ -50,12 +51,13 @@ def index_document(
         cur.execute(
             """
             INSERT INTO documents (title, doc_type, department, source_path,
-                                   is_approved, client_id, property_id, case_id)
-            VALUES (%s, %s, %s, %s, false, %s, %s, %s)
+                                   is_approved, client_id, property_id, case_id,
+                                   uploaded_by)
+            VALUES (%s, %s, %s, %s, false, %s, %s, %s, %s)
             RETURNING id
             """,
             (doc_title, doc_type, department, source_path,
-             client_id, property_id, case_id),
+             client_id, property_id, case_id, uploaded_by),
         )
         document_id = cur.fetchone()["id"]
         logger.info("Indexing document '%s' (id=%d)", doc_title, document_id)

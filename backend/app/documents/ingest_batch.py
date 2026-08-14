@@ -153,6 +153,7 @@ def process_file(file_path: Path) -> bool:
             client_id=metadata.client_id,
             property_id=metadata.property_id,
             case_id=metadata.case_id,
+            uploaded_by=overrides.get("uploaded_by"),
         )
         logger.info(
             "Indexed %d, skipped %d for document %d",
