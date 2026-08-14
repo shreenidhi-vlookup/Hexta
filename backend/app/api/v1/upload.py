@@ -12,27 +12,66 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.auth.permissions import require_role
 from app.config import settings
 from app.dependencies import require_auth
+from app.documents import categories, upload_metadata
 from app.documents.auto_ingest import trigger_ingestion
 from app.documents.validation import validate_upload
 
 router = APIRouter()
 
 
+def _resolve_category(
+    doc_type: str | None,
+    department: str | None,
+) -> tuple[str | None, str | None]:
+    """Validate the submitted category, normalising "no choice" to None.
+
+    Rejects rather than coerces an unrecognised value: these strings are
+    compared against document rows in SQL, so quietly accepting "General"
+    or "invoice" would write a value no later lookup ever matches -- and
+    for department that means a document readable by nobody but admins.
+    """
+    doc_type = (doc_type or "").strip() or None
+    department = (department or "").strip() or None
+
+    if doc_type == categories.AUTO_DOC_TYPE:
+        doc_type = None
+    if doc_type is not None and not categories.is_valid_doc_type(doc_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown document type: {doc_type}",
+        )
+    if department is not None and not categories.is_valid_department(department):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown department: {department}",
+        )
+    return doc_type, department
+
+
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
+    doc_type: str | None = Form(None),
+    department: str | None = Form(None),
     user: dict = Depends(require_auth),
 ) -> dict:
     """Receive a document upload, validate, write to storage/pending/.
 
+    ``doc_type`` and ``department`` are the admin's category choice. Both
+    are optional: an absent doc_type leaves the type to content detection
+    at ingest, and an absent department falls back to the default.
+
     Returns immediately — ingestion happens in a separate batch process.
     """
     require_role(user, "admin")
+
+    # Before the file is read, so a bad category costs nothing.
+    resolved_type, resolved_department = _resolve_category(doc_type, department)
 
     if not file.filename:
         raise HTTPException(
@@ -63,6 +102,10 @@ async def upload_document(
     dest = pending_dir / unique_name
     dest.write_bytes(content)
 
+    # Recorded beside the file so the batch ingester (a separate process)
+    # can pick it up; the handler itself still never ingests.
+    upload_metadata.write_sidecar(dest, resolved_type, resolved_department)
+
     indexed = trigger_ingestion(pending_dir)
 
     return {
@@ -75,4 +118,6 @@ async def upload_document(
         "stored_as": str(dest),
         "size_bytes": file_size,
         "indexing": indexed,
+        "doc_type": resolved_type,
+        "department": resolved_department,
     }
