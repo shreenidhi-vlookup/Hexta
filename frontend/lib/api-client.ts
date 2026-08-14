@@ -232,6 +232,23 @@ export interface AdminDocument {
   created_at: string;
 }
 
+/** One selectable document type or department. */
+export interface CategoryOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * The category vocabulary, served by the backend rather than duplicated
+ * here so that adding a category stays a backend-only change.
+ */
+export interface DocumentCategories {
+  doc_types: CategoryOption[];
+  departments: CategoryOption[];
+  auto_doc_type: string;
+  default_department: string;
+}
+
 export interface AuditEntry {
   id: number;
   email: string | null;
@@ -367,18 +384,37 @@ export async function acknowledgeGap(
   return adminFetch(`/analytics/knowledge-gaps/${gapId}/acknowledge`, token, "POST");
 }
 
+export async function fetchDocumentCategories(
+  token: string
+): Promise<DocumentCategories> {
+  const response = await fetch(`${API_BASE_URL}/documents/categories`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error("Could not load document categories");
+  }
+  return response.json();
+}
+
 export async function uploadDocument(
   file: File,
-  token: string
+  token: string,
+  category?: { docType: string; department: string }
 ): Promise<{
   message: string;
   filename: string;
   stored_as: string;
   size_bytes: number;
   indexing: boolean;
+  doc_type: string | null;
+  department: string | null;
 }> {
   const form = new FormData();
   form.append("file", file);
+  if (category) {
+    form.append("doc_type", category.docType);
+    form.append("department", category.department);
+  }
   const response = await fetch(`${API_BASE_URL}/documents/upload`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
