@@ -13,7 +13,7 @@ every "no answer found" query returns HTTP 500 instead of a graceful
 
 from __future__ import annotations
 
-from app.auth.rbac import is_admin, is_client, resolve_user_departments, resolve_user_client_id
+from app.auth.rbac import is_admin, is_client, resolve_user_client_id
 from app.response.package_builder import ResponsePackage
 
 
@@ -32,24 +32,33 @@ def validate_package(
     Low-confidence results are valid responses that the caller routes to
     ``"no_answer"`` or ``"partial"``, not server errors.
     """
-    # RBAC check — safety net (primary enforcement is in the SQL WHERE clause)
+    # RBAC check — safety net (primary enforcement is in the SQL WHERE clause,
+    # search/metadata_filters.py). This mirrors that rule and must be kept in
+    # step with it: the two previously disagreed, because this one still
+    # enforced department after the primary filter moved to client ownership,
+    # and a processor legitimately retrieving a document from another
+    # department had their response rejected as an RBAC violation — surfacing
+    # as an HTTP 500 rather than an answer.
     if user is not None and not is_admin(user):
-        user_depts = set(resolve_user_departments(user))
-
-        # Client scope: clients must never see another client's data.
+        # Client scope: clients see only their own data.
         user_client_id = resolve_user_client_id(user)
-        if user_client_id is not None:
+        if is_client(user):
             for excerpt in package.excerpts:
-                cid = excerpt.source.client_id
-                if cid is not None and cid != user_client_id:
+                if excerpt.source.client_id != user_client_id:
                     return False, (
                         f"RBAC violation: chunk {excerpt.source.chunk_id} "
-                        f"belongs to client_id '{cid}', not '{user_client_id}'"
+                        f"belongs to client_id '{excerpt.source.client_id}', "
+                        f"not '{user_client_id}'"
                     )
-
-        for excerpt in package.excerpts:
-            if excerpt.source.department and excerpt.source.department not in user_depts:
-                return False, f"RBAC violation: chunk from department '{excerpt.source.department}' not visible to user"
+        else:
+            # Staff: knowledge only, never a client's records.
+            for excerpt in package.excerpts:
+                if excerpt.source.client_id is not None:
+                    return False, (
+                        f"RBAC violation: chunk {excerpt.source.chunk_id} "
+                        f"belongs to client_id '{excerpt.source.client_id}' "
+                        "and is not visible to staff"
+                    )
 
     # Version and approval check — safety net
     for excerpt in package.excerpts:

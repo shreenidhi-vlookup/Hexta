@@ -28,12 +28,17 @@ def _categories_payload() -> dict:
 
 @router.get("/categories")
 async def list_categories(user: dict = Depends(require_auth)) -> dict:
-    """Category vocabulary for the upload form (requires admin role).
+    """Category vocabulary for the upload form.
 
     Served rather than duplicated in the frontend so that adding a
     category stays a backend-only change.
+
+    Open to processors, not just admins: they upload too, and without this
+    the form silently drops both dropdowns and every upload falls back to
+    auto-detection. The payload is a static vocabulary — it exposes
+    nothing about any document.
     """
-    require_role(user, "admin")
+    require_role(user, "processor")
     return _categories_payload()
 
 
