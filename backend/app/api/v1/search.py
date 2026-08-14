@@ -31,11 +31,12 @@ from app.config import settings
 from app.db.postgres.session import acquire
 from app.dependencies import require_auth
 from app.knowledge_gap.gap_detector import detect_and_log
-from app.query_processing import alias_resolver, domain_terms
+from app.query_processing import alias_resolver, corpus_vocab, domain_terms
 from app.query_processing import comparison, coreference, scope_guard
 from app.query_processing.pipeline import process_query
 from app.ranking.reranker import rerank
 from app.ranking.rrf import rank_fusion
+from app.response import answerability
 from app.response.confidence_thresholds import route_by_confidence
 from app.response.followup_questions import has_domain_topic, suggest_followups
 from app.response.package_builder import build_response_package
@@ -305,6 +306,7 @@ def _decide_routing(
     answer_phrase: str,
     top_excerpt: str,
     confidence: float,
+    rerank_score: float | None = None,
 ) -> str:
     """Decide routing with safety overrides, never fabricating an answer.
 
@@ -312,13 +314,20 @@ def _decide_routing(
       * there is no usable answer phrase (Phase A extracted only
         questions/headings → empty), or
       * the retrieved content shares almost no content terms with the
-        question (off-topic retrieval that slipped through ranking).
+        question (off-topic retrieval that slipped through ranking), or
+      * the cross-encoder affirmatively judges that the evidence does not
+        answer the question (see response/answerability.py). This catches
+        the complementary failure: a chunk that shares the question's
+        vocabulary — so it clears the lexical gate above — while
+        answering a different question entirely.
     Otherwise confidence routing (``answer`` | ``partial``) applies.
     """
     if not (answer_phrase or "").strip():
         return "no_answer"
     relevance = _evidence_relevance(question, answer_phrase, top_excerpt)
     if relevance < _NO_ANSWER_RELEVANCE:
+        return "no_answer"
+    if not answerability.is_answerable(rerank_score):
         return "no_answer"
     return route_by_confidence(confidence)
 
@@ -329,6 +338,7 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
     Returns ``(block, retrieved_chunk_ids)``.
     """
     ranked = _rank_sub_query(conn, search_text, user)
+    rerank_scores: dict[int, float] = {}
 
     if settings.rerank_enabled and ranked:
         rerank_candidates = [
@@ -346,6 +356,11 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
             top_k=min(settings.rerank_top_k, len(rerank_candidates)),
         )
         rerank_order = {c["chunk_id"]: i for i, c in enumerate(rerank_result)}
+        rerank_scores = {
+            c["chunk_id"]: c["rerank_score"]
+            for c in rerank_result
+            if "rerank_score" in c
+        }
         ranked.sort(key=lambda c: rerank_order.get(c.chunk_id, len(rerank_order)))
 
     user_depts = resolve_user_departments(user)
@@ -372,11 +387,20 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
     # _apply_scope_guard). Applied after the relevance gate since it must
     # win regardless of how on-topic retrieval happened to score.
     package.confidence = _apply_scope_guard(question, package.confidence)
+    # Phase B.6: answerability — the cross-encoder's judgement of the
+    # chunk the answer was actually drawn from (None when reranking is
+    # off or that chunk was outside the rescored head, in which case the
+    # gate abstains).
+    answer_rerank_score = rerank_scores.get(ranked[0].chunk_id) if ranked else None
+    package.confidence = answerability.cap_confidence(
+        package.confidence, answer_rerank_score
+    )
     package.routing = _decide_routing(
         question,
         package.answer_phrase,
         package.excerpts[0].text if package.excerpts else "",
         package.confidence,
+        answer_rerank_score,
     )
 
     valid, reason = validate_package(package, user)
@@ -433,6 +457,15 @@ async def search(
 
     history = [h.model_dump() for h in request.history] if request.history else []
     raw = coreference.resolve_references(request.query, history)
+
+    # Refresh the corpus-derived vocabulary before query processing so
+    # spell correction can recognise terms that exist only in the user's
+    # own documents (see corpus_vocab). TTL-cached, so this is a no-op on
+    # all but the first request in each window; process_query itself stays
+    # I/O-free.
+    with acquire() as conn:
+        corpus_vocab.refresh_if_stale(conn)
+
     plan = process_query(raw)
 
     if not plan.sub_queries:
