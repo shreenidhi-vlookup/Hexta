@@ -96,3 +96,45 @@ class TestMyDocumentsScope:
 
         assert "is_approved" in _DOCUMENT_COLUMNS
         assert "uploaded_by" in _DOCUMENT_COLUMNS
+
+
+class TestRolesEndpoint:
+    """The role list was hardcoded in two frontend components, so renaming
+    a role left the UI offering one the backend would reject."""
+
+    def test_roles_come_from_the_shared_hierarchy(self):
+        import asyncio
+
+        from app.api.v1.admin import list_roles
+        from app.auth import rbac
+
+        result = asyncio.run(list_roles(user={"role": "admin"}))
+        assert result["roles"] == list(rbac.STAFF_ROLE_HIERARCHY)
+
+    def test_processor_is_offered(self):
+        import asyncio
+
+        from app.api.v1.admin import list_roles
+
+        assert "processor" in asyncio.run(list_roles(user={"role": "admin"}))["roles"]
+
+    def test_retired_roles_are_not_offered(self):
+        import asyncio
+
+        from app.api.v1.admin import list_roles
+
+        roles = asyncio.run(list_roles(user={"role": "admin"}))["roles"]
+        for retired in ("loan_officer", "underwriter", "compliance"):
+            assert retired not in roles
+
+    def test_requires_admin(self):
+        import asyncio
+
+        import pytest as _pytest
+        from fastapi import HTTPException
+
+        from app.api.v1.admin import list_roles
+
+        with _pytest.raises(HTTPException) as exc:
+            asyncio.run(list_roles(user={"role": "processor"}))
+        assert exc.value.status_code == 403

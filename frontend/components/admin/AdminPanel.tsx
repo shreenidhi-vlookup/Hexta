@@ -18,6 +18,7 @@ import {
   getKnowledgeGaps,
   updateUserAdmin,
   approveDocument,
+  getAdminRoles,
 } from "@/lib/api-client";
 import type {
   AdminDocument,
@@ -232,7 +233,21 @@ const SECTION_DESC: Record<AdminSection, string> = {
 
 export { DataTable, StatCard, OutcomeBadge, StatusBadge, truncate, fmtDate, confidenceCell };
 
-const ROLES = ["super_admin", "admin", "loan_officer", "underwriter", "compliance"];
+// Served by the backend (GET /admin/roles) rather than listed here: this
+// copy still offered loan_officer/underwriter/compliance after those roles
+// were collapsed into "processor", so the picker could set a role the API
+// would reject. The fallback keeps the control usable if the fetch fails.
+const FALLBACK_ROLES = ["processor", "admin", "super_admin"];
+
+function useAssignableRoles(): string[] {
+  const [roles, setRoles] = useState<string[]>(FALLBACK_ROLES);
+  useEffect(() => {
+    getAdminRoles(getToken() ?? "")
+      .then((r) => setRoles(r.roles))
+      .catch(() => undefined);
+  }, []);
+  return roles;
+}
 
 function UserActions({
   user,
@@ -248,6 +263,7 @@ function UserActions({
   setSaveError: (e: string | null) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const roles = useAssignableRoles();
 
   const update = async (patch: Partial<AdminUser> & { role?: string }) => {
     setSaving(true);
@@ -276,7 +292,7 @@ function UserActions({
         onChange={(e) => update({ role: e.target.value as AdminUser["role"] })}
         aria-label="Change role"
       >
-        {ROLES.map((r) => (
+        {roles.map((r) => (
           <option key={r} value={r}>
             {r}
           </option>
