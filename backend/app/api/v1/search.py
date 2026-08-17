@@ -106,104 +106,6 @@ def _rank_sub_query(conn, text: str, user: dict):
     return _apply_fragment_penalty(ranked)
 
 
-# The cross-encoder reranker can only afford to score `rerank_top_k`
-# candidates (CLAUDE.md rule 6's <200ms budget -- measured live, scoring
-# all `bm25_limit` candidates costs 1154ms p95 at n=25 vs 191ms at n=5),
-# so it never sees anything RRF placed below that cutoff. RRF's rank-based
-# fusion means a chunk that's a near-tie with the window's weakest member
-# can still land one rank outside it and be permanently invisible to the
-# reranker, even when it would score far better once actually evaluated.
-#
-# Measured live: for "What does a lender check before approving a
-# mortgage?", the correct glossary definition (Underwriting) sat at RRF
-# rank 6 against a window of 5 -- effectively tied with rank 5
-# (rrf_score 0.01484 vs 0.01486) -- while the window's rank-1 slot held a
-# different, wrong glossary chunk (Prepayment Penalty) from the very same
-# document. That ruled out a document-diversity framing: both the right
-# and wrong chunks came from the same source, so "make sure more than one
-# document is represented" does nothing here -- the document was already
-# represented, just by the wrong chunk. What actually pushed the right
-# one out was four SOP chunks occupying ranks 2-5 on partial lexical
-# overlap. The fix that matches the evidence is score proximity, not
-# document identity: rescue a near-miss candidate regardless of which
-# document it's from, and only when its RRF score is close enough to the
-# window's weakest member that rank alone -- not relevance -- explains why
-# it's outside. At zero extra cross-encoder cost, since the number of
-# candidates scored is unchanged.
-#
-# _MIN_RESCUE_SCORE_RATIO stays deliberately strict (0.9, i.e. within 10%
-# of the weakest window score) precisely because it ignores document
-# identity: with nothing else gating it, a loose ratio would pull in any
-# plausible-looking chunk from anywhere in the lookahead purely because a
-# large document floods the corpus with partial matches. A tight ratio
-# means only genuine near-ties get rescued.
-#
-# _MAX_RESCUE_SWAPS is 1, not 2: an earlier version allowed 2 and had a
-# real bug -- after the first swap replaces window[-1], the window is
-# re-sorted and the just-rescued candidate becomes the new window[-1]
-# (it's always the smallest of the bunch, since candidates only get
-# picked from ranks below the original window). A second swap then
-# targets window[-1] again and evicts the very candidate the first swap
-# just rescued, for something worse. The measured finding only ever
-# needed one rescue; capping at 1 sidesteps the eviction bug entirely
-# rather than adding bookkeeping to track which original slot each swap
-# should target.
-_MAX_RESCUE_SWAPS = 1
-# The lookahead depth costs nothing -- it's a Python list scan, not
-# cross-encoder scoring, which only ever runs on `top_k` candidates
-# regardless of how far the lookahead searches. The relevance guard is
-# entirely `_MIN_RESCUE_SCORE_RATIO`; there's no latency reason to keep
-# the lookahead shallow. Searching the full bm25_limit candidate pool
-# matches two further live findings (2026-08-17) where the correct
-# glossary chunk was diluted past rank 15, not just one rank outside
-# the window: "How can I calculate the value I have in my property?"
-# and "Who collects my monthly mortgage payment after closing?".
-_RESCUE_LOOKAHEAD = None  # None => search the full candidate list passed in
-_MIN_RESCUE_SCORE_RATIO = 0.9
-
-
-def _diversify_rerank_window(ranked: list, top_k: int) -> list:
-    """Rescue near-miss candidates RRF placed just outside the window.
-
-    Walks the RRF order just past the naive top_k window (see
-    `_RESCUE_LOOKAHEAD`) for candidates whose RRF score is within
-    `_MIN_RESCUE_SCORE_RATIO` of the window's weakest member -- a sign
-    the cutoff, not relevance, is why they're outside it -- and swaps up
-    to `_MAX_RESCUE_SWAPS` of them in for the weakest window slots.
-    Deliberately ignores document identity (see module comment above):
-    the two chunks that motivated this can come from the same document.
-
-    Only reorders which candidates are in the window; the reranker's own
-    cross-encoder sort decides the final order of whatever it receives.
-    """
-    if top_k >= len(ranked) or top_k == 0:
-        return ranked
-
-    window = list(ranked[:top_k])
-    lookahead = (
-        ranked[top_k:]
-        if _RESCUE_LOOKAHEAD is None
-        else ranked[top_k : top_k + _RESCUE_LOOKAHEAD]
-    )
-    swaps = 0
-
-    for candidate in lookahead:
-        if swaps >= _MAX_RESCUE_SWAPS:
-            break
-        weakest = window[-1]
-        if weakest.rrf_score <= 0:
-            break
-        if candidate.rrf_score < weakest.rrf_score * _MIN_RESCUE_SCORE_RATIO:
-            # Candidates only get further from the window's score as we
-            # walk deeper into the lookahead, so nothing later qualifies.
-            break
-        window[-1] = candidate
-        window.sort(key=lambda c: c.rrf_score, reverse=True)
-        swaps += 1
-
-    return window + list(ranked[top_k:])
-
-
 # Words that make a question a "bare follow-up": it carries no topic of
 # its own after question-starters and common words are removed. Such a
 # question is unanswerable in isolation ("what happens next?"), so its
@@ -446,22 +348,24 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
         # rerank_top_k keep their RRF order: they all map to the same
         # sort key below, and Python's stable sort preserves it.
         #
-        # Before slicing, make sure that head isn't monopolized by one
-        # document -- see _diversify_rerank_window's docstring for the
-        # measured cross-document interference this guards against.
-        # The rescue must see the whole RRF-fused pool (_rank_sub_query
-        # computes RRF over up to 100 candidates), not the bm25_limit=25
-        # slice below -- two live queries had their correct chunk diluted
-        # past rank 25 by SOP volume, not just past the reranker's top 5.
-        # bm25_limit is applied after, to cap how many candidates get
-        # turned into rerank_candidates; rescue itself is a free list
-        # scan, not cross-encoder work, so searching further costs nothing.
-        diversified = _diversify_rerank_window(ranked, rerank_top_k)[
-            : settings.bm25_limit
-        ]
+        # A same-day attempt to "rescue" a near-miss RRF candidate into
+        # this window (swapping it in for the window's own weakest slot
+        # when the two were a near-tie on RRF score) was reverted after
+        # four variants each failed a different way and the last one
+        # proved the mechanism unsound rather than buggy: RRF score
+        # proximity cannot tell "the weakest slot is wrong, replace it"
+        # apart from "the weakest slot is already right, don't touch it"
+        # -- it swapped out a chunk that was already correctly in the
+        # window (Equity, at rank 5) for a worse one, purely because the
+        # replacement happened to be a near-tie. Growing the window
+        # instead of swapping isn't viable either: the documented
+        # calibration above (rerank_top_k's own comment) measured 208.7ms
+        # p95 at just one extra candidate (n=6), already over budget.
+        # Left as plain RRF-order slicing; see this session's plan notes
+        # for the live queries that still regress because of it.
         rerank_candidates = [
             {"chunk_id": c.chunk_id, "content": c.content}
-            for c in diversified
+            for c in ranked[: settings.bm25_limit]
         ]
         rerank_result = rerank(
             query=question,
