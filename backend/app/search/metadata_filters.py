@@ -12,7 +12,8 @@ there is deliberately just one.
 The boundary is **client ownership**, not department:
 
     admin / super_admin   everything, unfiltered
-    processor             every document that belongs to no client
+    processor             every document with no client, plus any client
+                           they have self-assigned to (assigned_clients)
     client                only documents tagged with their own client_id
     anything else         nothing
 
@@ -22,10 +23,11 @@ on an admin to grant them a department, and in practice every document sat
 in "general" so it was never enforcing anything anyway. Department remains
 on the document as organisational metadata for filtering and display.
 
-The ``d.client_id IS NULL`` rule is the part to be careful with. No
-client-tagged document exists yet, so today it changes nothing — but it
-means client records can be introduced later without having to retrofit a
-boundary into a system that has already gone fully open.
+Client-tagged documents (Stage 2) are reachable by staff only through
+self-assignment (``/me/clients``, api/v1/me.py) — appearing in
+``assigned_clients`` is the only way a client's document ever enters a
+processor's results. There is no path from "processor" to "every client's
+documents"; only to the ones they have explicitly claimed.
 """
 
 from __future__ import annotations
@@ -48,6 +50,7 @@ def get_search_filter(user: dict | None) -> tuple[str, list]:
         STAFF_ROLE_HIERARCHY,
         is_admin,
         is_client,
+        resolve_user_assigned_clients,
         resolve_user_client_id,
     )
 
@@ -66,8 +69,12 @@ def get_search_filter(user: dict | None) -> tuple[str, list]:
 
     role = user.get("role")
     if role in STAFF_ROLE_HIERARCHY and role not in CLIENT_ROLES:
-        # Staff: all knowledge, no client records.
-        return "d.client_id IS NULL", []
+        # Staff: all knowledge, plus any client they have self-assigned to.
+        # ``= ANY(%s)`` over an empty array is always false in Postgres, so
+        # an unassigned processor gets exactly the old ``IS NULL`` clause —
+        # no special-casing needed for "no assignments yet".
+        assigned = resolve_user_assigned_clients(user)
+        return "(d.client_id IS NULL OR d.client_id = ANY(%s))", [assigned]
 
     return "1=0", []
 

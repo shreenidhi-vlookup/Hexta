@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 SIDECAR_SUFFIX = ".meta.json"
 
 # Only these keys are honoured; anything else in the file is ignored.
-_TEXT_KEYS = ("doc_type", "department")
+_TEXT_KEYS = ("doc_type", "department", "client_id")
 _INT_KEYS = ("uploaded_by",)
 
 
@@ -42,6 +42,7 @@ def write_sidecar(
     doc_type: str | None,
     department: str | None,
     uploaded_by: int | None = None,
+    client_id: str | None = None,
 ) -> Path | None:
     """Record the uploader's choices and identity.
 
@@ -50,7 +51,11 @@ def write_sidecar(
     """
     payload: dict[str, object] = {
         key: value
-        for key, value in (("doc_type", doc_type), ("department", department))
+        for key, value in (
+            ("doc_type", doc_type),
+            ("department", department),
+            ("client_id", client_id),
+        )
         if value
     }
     if uploaded_by:

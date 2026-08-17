@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import admin, analytics, auth, documents, feedback, search, settings, upload
+from app.api.v1 import admin, analytics, auth, documents, feedback, me, search, settings, upload
 
 api_router = APIRouter()
 
@@ -21,3 +21,4 @@ api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"]
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_router.include_router(me.router, prefix="/me", tags=["me"])
