@@ -73,6 +73,31 @@ def _is_title_like(label: str) -> bool:
     return True
 
 
+def _is_bare_label(line: str) -> bool:
+    """True for a short title-like line that implicitly labels the list
+    right after it, the same role a colon-terminated line already plays.
+
+    Found live in the real SOP: "Task 6 — Suitability Letter\nObjective\n
+    Provide compliant recommendation documentation.\nTiming" is followed
+    by "Send:\n- Alongside offer OR\n- Within 5 working days of securing
+    rate". The colon-preamble rule grabs "Timing" only if it ends with
+    ":" -- it doesn't here, so "Timing" was flushed into the previous
+    paragraph chunk and the checklist chunk lost the only word that told
+    it apart from an unrelated "Send:" checklist elsewhere in the same
+    document. "When should the suitability letter be sent?" then matched
+    the wrong "Send:" list -- both looked identical without their labels.
+
+    Kept tight (<=3 words, no terminal punctuation, title-cased) so an
+    ordinary short sentence isn't swept up as if it were a label.
+    """
+    stripped = line.strip()
+    if not stripped or stripped[-1] in ".!?:;,":
+        return False
+    if len(stripped.split()) > 3:
+        return False
+    return _is_title_like(stripped)
+
+
 def _definition_term(block: str) -> str | None:
     """Return the defined term if ``block`` is a "Term: definition" entry."""
     match = _DEFINITION_RE.match(block.strip())
@@ -165,7 +190,65 @@ class StructuralChunker:
             )
             merged.pop(0)
 
-        return merged
+        return self._fold_orphaned_titles(merged)
+
+    def _fold_orphaned_titles(self, chunks: list[Chunk]) -> list[Chunk]:
+        """Fold a small orphaned paragraph into the checklist right after
+        it, instead of leaving it as its own near-empty chunk.
+
+        Reuses the same "small paragraph" threshold `_merge_small_chunks`
+        already applies when folding a small paragraph into a
+        *preceding* paragraph -- this is that same idea aimed forward, at
+        a following *checklist*, which the existing merge never covers
+        (it only ever merges paragraph into paragraph).
+
+        Two real cases from the SOP, both a blank line away from their
+        own list so `_chunk_section`'s inline colon-preamble logic never
+        saw label and list together in the same pass:
+
+        - "Step 5.3 — Update Liabilities" is its own 4-word chunk,
+          immediately before "Include:\n- Loans\n- Credit cards\n-
+          Existing commitments". The short title chunk was winning
+          retrieval for "What must be updated in the fact find for
+          liabilities?" on BM25's length normalisation alone, while
+          carrying none of the actual answer.
+        - "Mark task:\nComplete\nTask 6 — Suitability Letter\nObjective\n
+          Provide compliant recommendation documentation.\nTiming",
+          before "Send:\n- Alongside offer OR\n- Within 5 working days of
+          securing rate". An earlier version of this fix moved only the
+          trailing "Timing" line forward, which fixed the label but not
+          the actual problem: the identifying phrase "Suitability
+          Letter" stayed behind in the remainder, so the rescued list
+          still had zero lexical or semantic connection to the query
+          ("suitability letter") and was never even retrieved as a
+          candidate. Folding the *whole* small paragraph -- not just its
+          last line -- keeps the identifying phrase attached to its list.
+        """
+        folded: list[Chunk] = []
+        skip_next = False
+        for i, c in enumerate(chunks):
+            if skip_next:
+                skip_next = False
+                continue
+            is_orphan = (
+                c.chunk_type == "paragraph"
+                and self._count_tokens(c.content) < self.min_tokens
+                and i + 1 < len(chunks)
+                and chunks[i + 1].chunk_type == "checklist"
+                and chunks[i + 1].section == c.section
+            )
+            if is_orphan:
+                nxt = chunks[i + 1]
+                folded.append(Chunk(
+                    content=c.content + "\n" + nxt.content,
+                    section=nxt.section,
+                    chunk_type="checklist",
+                    page_number=nxt.page_number,
+                ))
+                skip_next = True
+            else:
+                folded.append(c)
+        return folded
 
     def _chunk_pdf(self, extracted: ExtractedText) -> Iterator[Chunk]:
         """Chunk PDF pages, attempting table detection per page."""
@@ -257,7 +340,10 @@ class StructuralChunker:
                     break
 
                 preamble: list[str] = []
-                if current and current[-1].strip().endswith(":"):
+                if current and (
+                    current[-1].strip().endswith(":")
+                    or _is_bare_label(current[-1])
+                ):
                     preamble = [current.pop()]
                 if current:
                     yield from self._yield_text_chunk(current, section, page_num)
