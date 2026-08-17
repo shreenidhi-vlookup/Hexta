@@ -53,6 +53,31 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
     if not any(_is_list_item(l.strip()) for l in lines):
         return
 
+    # A list of short items is one retrieval unit, not several.
+    #
+    # Splitting per item is right when each bullet is a substantial
+    # statement a query could match on its own. It is wrong when the items
+    # are two or three words: a real procedure SOP produced 124 checklist
+    # chunks averaging 28 characters ("- Loan amount").
+    #
+    # Fragments that small are actively harmful, not merely useless. BM25
+    # normalises by document length, so a 13-character chunk matching one
+    # query word scores extremely high, and its embedding is dominated by
+    # those two words. Measured: once that SOP joined the corpus, its
+    # fragments outranked the glossary's own definitions and the glossary
+    # suite fell from 51/52 to 46/52 -- "how can I calculate the value I
+    # have in my property?" began answering "Enter: - Property address"
+    # instead of the Equity definition.
+    if _is_short_list(lines):
+        content = "\n".join(l.strip() for l in lines if l.strip())
+        yield ChecklistChunk(
+            content=content,
+            section=section,
+            chunk_type="checklist",
+            page_number=page_number,
+        )
+        return
+
     current_item: list[str] = []
     current_is_list = False
     preamble: str | None = None
@@ -89,6 +114,29 @@ def chunk_checklist(text: str, section: str | None = None, page_number: int | No
             current_item.append(stripped)
 
     yield from _flush()
+
+
+# An item shorter than this carries too little text to stand alone as a
+# retrieval unit. Comfortably below a real bullet like "Veterans who
+# served the minimum active-duty service requirement" (~55 chars) and
+# comfortably above a procedure label like "- Loan amount" (13).
+_MIN_STANDALONE_ITEM_CHARS = 45
+
+# Above this the list is too large to keep whole -- splitting per item is
+# then better than one oversized chunk, whatever the item lengths.
+_MAX_WHOLE_LIST_CHARS = 600
+
+
+def _is_short_list(lines: list[str]) -> bool:
+    """True when the list's items are too small to stand alone."""
+    items = [l.strip() for l in lines if _is_list_item(l.strip())]
+    if not items:
+        return False
+    total = sum(len(l.strip()) for l in lines if l.strip())
+    if total > _MAX_WHOLE_LIST_CHARS:
+        return False
+    average = sum(len(item) for item in items) / len(items)
+    return average < _MIN_STANDALONE_ITEM_CHARS
 
 
 def _is_list_item(line: str) -> bool:

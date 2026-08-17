@@ -81,6 +81,48 @@ def _collapse_doubling(line: str) -> str:
     return line
 
 
+def _is_list_line(line: str) -> bool:
+    """True for a repaired list item — bullet or numbered."""
+    from app.documents.chunking.checklist_chunker import _is_list_item
+
+    return _is_list_item(line.strip())
+
+
+def _join_list_blank_lines(lines: list[str]) -> list[str]:
+    """Drop blank lines that only separate a list from its own items.
+
+    Rasterised layout has no notion of "same list": the vertical gap
+    between bullets comes back as a blank line, which every chunker reads
+    as a block boundary. On the real SOP that meant a list's preamble
+    reached only its first item and 118 of 124 checklist chunks were
+    emitted bare at ~20 characters — far too little text to carry a BM25
+    signal or a meaningful embedding.
+
+    A blank line is dropped only when it sits between two list items, or
+    between a colon-terminated preamble and the item below it. A blank
+    line before ordinary prose is a real paragraph break and survives.
+    """
+    out: list[str] = []
+    for index, line in enumerate(lines):
+        if line.strip():
+            out.append(line)
+            continue
+
+        previous = next(
+            (l for l in reversed(out) if l.strip()), ""
+        ).strip()
+        following = next(
+            (l for l in lines[index + 1:] if l.strip()), ""
+        ).strip()
+
+        binds_to_list = _is_list_line(following) and (
+            _is_list_line(previous) or previous.endswith(":")
+        )
+        if not binds_to_list:
+            out.append(line)
+    return out
+
+
 def clean_ocr_text(text: str) -> str:
     """Repair OCR artifacts in a single page or document of OCR output."""
     if not text:
@@ -91,7 +133,7 @@ def clean_ocr_text(text: str) -> str:
         if _is_noise(line):
             continue
         out.append(_collapse_doubling(_repair_bullet(line)))
-    return "\n".join(out)
+    return "\n".join(_join_list_blank_lines(out))
 
 
 def clean_ocr_pages(pages: list[str]) -> list[str]:
