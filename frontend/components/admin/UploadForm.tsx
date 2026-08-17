@@ -33,6 +33,10 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
   const [categories, setCategories] = useState<DocumentCategories | null>(null);
   const [docType, setDocType] = useState("");
   const [department, setDepartment] = useState("");
+  // Optional Intelliflo client reference (Stage 2, Task 5). Blank means
+  // firm-wide staff knowledge, the same as before this field existed --
+  // nothing here changes the meaning of an upload that doesn't set it.
+  const [clientId, setClientId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -65,6 +69,7 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
         file,
         token,
         categories ? { docType, department } : undefined,
+        clientId.trim() || undefined,
       );
       setResult({
         ok: true,
@@ -73,6 +78,7 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
           : `${res.message} The document will not be indexed automatically.`,
       });
       setFile(null);
+      setClientId("");
       if (inputRef.current) inputRef.current.value = "";
       onSuccess?.();
     } catch (err) {
@@ -145,6 +151,24 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
         </div>
       )}
 
+      <div>
+        <Label
+          htmlFor="doc-client-id"
+          className="text-xs uppercase tracking-wide text-muted-foreground"
+        >
+          Client reference (optional)
+        </Label>
+        <Input
+          id="doc-client-id"
+          type="text"
+          placeholder="e.g. the Intelliflo client reference"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          disabled={uploading}
+          maxLength={100}
+        />
+      </div>
+
       <div className="flex items-end gap-3">
         <div className="flex-1">
           <Label htmlFor="doc-file" className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -196,7 +220,9 @@ export default function UploadForm({ onSuccess }: { onSuccess?: () => void }) {
           place on purpose. */}
       <p className="text-xs text-muted-foreground">
         Type and department organise the knowledge base — every member of
-        staff can retrieve this document once it is approved.
+        staff can retrieve this document once it is approved. Set a client
+        reference to scope it to that client instead — only staff assigned
+        to that client can then retrieve it.
       </p>
       <p className="text-xs text-muted-foreground">
         An administrator reviews each upload before it becomes searchable.

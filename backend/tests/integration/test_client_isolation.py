@@ -242,3 +242,82 @@ class TestClientIsolation:
         assert seeded_client_document["chunk_b"] not in ids_a
         assert seeded_client_document["chunk_b"] in ids_b
         assert seeded_client_document["chunk_a"] not in ids_b
+
+
+class TestStaffSelfAssignedAccess:
+    """Stage 2, Task 8 verification: the actual boundary Task 7 built.
+
+    Uses the same seeded CLIENT_A / CLIENT_B documents as the tests
+    above, from the staff side -- an unassigned processor, then the same
+    processor after self-assigning, proving isolation holds in both
+    directions with a real SQL round-trip, not a unit-level stub.
+    """
+
+    UNASSIGNED_PROCESSOR = {
+        "role": "processor", "department": "general", "allowed_departments": [],
+    }
+
+    def test_unassigned_processor_sees_neither_client(self, seeded_client_document):
+        with acquire() as conn:
+            result = search_knowledge_base(
+                conn=conn,
+                sub_queries=["credit score ltv"],
+                user=self.UNASSIGNED_PROCESSOR,
+            )
+        retrieved_ids = {c.chunk_id for c in result.candidates}
+        assert seeded_client_document["chunk_a"] not in retrieved_ids
+        assert seeded_client_document["chunk_b"] not in retrieved_ids
+
+    def test_assigned_processor_reaches_only_their_assigned_client(
+        self, seeded_client_document,
+    ):
+        assigned_to_a = {
+            **self.UNASSIGNED_PROCESSOR, "assigned_clients": ["CLIENT_A"],
+        }
+        with acquire() as conn:
+            result = search_knowledge_base(
+                conn=conn,
+                sub_queries=["credit score ltv"],
+                user=assigned_to_a,
+            )
+        retrieved_ids = {c.chunk_id for c in result.candidates}
+        assert seeded_client_document["chunk_a"] in retrieved_ids
+        assert seeded_client_document["chunk_b"] not in retrieved_ids
+
+    def test_assignment_to_one_client_never_exposes_the_other(
+        self, seeded_client_document,
+    ):
+        """Assigned to A and B both, still never confuses which chunk
+        belongs to which -- both are reachable, neither leaks into the
+        wrong client's response (checked at the RBAC layer here; response
+        assembly keeps them in separate answer blocks)."""
+        assigned_to_both = {
+            **self.UNASSIGNED_PROCESSOR,
+            "assigned_clients": ["CLIENT_A", "CLIENT_B"],
+        }
+        with acquire() as conn:
+            result = search_knowledge_base(
+                conn=conn,
+                sub_queries=["credit score ltv"],
+                user=assigned_to_both,
+            )
+        retrieved_ids = {c.chunk_id for c in result.candidates}
+        assert seeded_client_document["chunk_a"] in retrieved_ids
+        assert seeded_client_document["chunk_b"] in retrieved_ids
+
+    def test_still_never_reaches_an_unassigned_client(
+        self, seeded_client_document,
+    ):
+        """Assigned to A only -- B stays out of reach exactly as if no
+        assignment existed at all."""
+        assigned_to_a_only = {
+            **self.UNASSIGNED_PROCESSOR, "assigned_clients": ["CLIENT_A"],
+        }
+        with acquire() as conn:
+            result = search_knowledge_base(
+                conn=conn,
+                sub_queries=["ltv policy"],
+                user=assigned_to_a_only,
+            )
+        retrieved_ids = {c.chunk_id for c in result.candidates}
+        assert seeded_client_document["chunk_b"] not in retrieved_ids

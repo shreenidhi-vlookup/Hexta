@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from app.api.v1.upload import _resolve_category
+from app.api.v1.upload import _resolve_category, _validate_client_id
 from app.documents import categories
 
 
@@ -48,3 +48,45 @@ class TestResolveCategory:
         """Coercing would write a value the RBAC filter never matches."""
         with pytest.raises(HTTPException):
             _resolve_category("policy", "General")
+
+
+class TestValidateClientId:
+    """Task 5, Stage 2: the optional Intelliflo client reference tagged
+    on a document at upload. Intelliflo owns the format, so this only
+    guards against what would break storage or a later SQL lookup --
+    it must never reshape a valid-but-unusual reference."""
+
+    def test_valid_reference_passes_through_verbatim(self):
+        assert _validate_client_id("INTELLIFLO-4471") == "INTELLIFLO-4471"
+
+    def test_surrounding_whitespace_is_trimmed(self):
+        assert _validate_client_id("  C-1  ") == "C-1"
+
+    def test_blank_becomes_none(self):
+        assert _validate_client_id("") is None
+        assert _validate_client_id("   ") is None
+
+    def test_missing_becomes_none(self):
+        assert _validate_client_id(None) is None
+
+    def test_odd_but_valid_characters_are_not_normalised(self):
+        """Intelliflo's own format, not Hexta's -- slashes, dots and
+        mixed case must survive exactly as given."""
+        assert _validate_client_id("C/2024.001-a") == "C/2024.001-a"
+
+    def test_too_long_is_rejected(self):
+        with pytest.raises(HTTPException) as exc:
+            _validate_client_id("x" * 101)
+        assert exc.value.status_code == 400
+
+    def test_at_the_length_limit_is_accepted(self):
+        assert _validate_client_id("x" * 100) == "x" * 100
+
+    def test_control_characters_are_rejected(self):
+        with pytest.raises(HTTPException) as exc:
+            _validate_client_id("C-1\x00")
+        assert exc.value.status_code == 400
+
+    def test_newline_is_rejected(self):
+        with pytest.raises(HTTPException):
+            _validate_client_id("C-1\nX-injected")

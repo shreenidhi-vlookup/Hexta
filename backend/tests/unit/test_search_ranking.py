@@ -42,9 +42,9 @@ class TestMetadataFilters:
             "department": "general",
             "allowed_departments": ["compliance"],
         })
-        assert clause == "d.client_id IS NULL"
+        assert clause == "(d.client_id IS NULL OR d.client_id = ANY(%s))"
         assert "department" not in clause
-        assert params == []
+        assert params == [[]]
 
     def test_no_user_denies_all(self):
         """When user is None (unauthenticated), the RBAC filter must
