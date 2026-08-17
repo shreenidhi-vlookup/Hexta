@@ -78,22 +78,31 @@ class TestTableDetection:
 
 
 class TestChecklistPreambleLabel:
-    def test_preamble_before_first_bullet_is_paragraph_not_checklist(self):
+    def test_short_list_keeps_its_preamble_in_one_unit(self):
+        """Superseded expectation: this used to assert one chunk per item.
+        A list of two-or-three-word items is one retrieval unit, because
+        fragments that small outrank real content on BM25 (which
+        normalises by length) while carrying almost no meaning. See
+        TestShortListsStayWhole for the measurement. What this class was
+        really guarding -- the preamble not being lost or mislabelled --
+        still holds."""
         text = "Required documents for your application:\n- Pay stubs\n- Bank statements"
         chunks = list(chunk_checklist(text))
-        assert chunks[0].chunk_type == "paragraph"
-        assert chunks[0].content == "Required documents for your application:"
-        assert chunks[1].chunk_type == "checklist"
-        assert chunks[2].chunk_type == "checklist"
+        assert len(chunks) == 1
+        assert chunks[0].chunk_type == "checklist"
+        assert "Required documents for your application:" in chunks[0].content
+        assert "Pay stubs" in chunks[0].content
+        assert "Bank statements" in chunks[0].content
 
     def test_no_list_items_yields_nothing(self):
         assert list(chunk_checklist("Just a plain paragraph.\nAnother line.")) == []
 
-    def test_pure_checklist_all_items_typed_checklist(self):
+    def test_short_pure_checklist_is_one_chunk(self):
         text = "- One\n- Two\n- Three"
         chunks = list(chunk_checklist(text))
-        assert len(chunks) == 3
-        assert all(c.chunk_type == "checklist" for c in chunks)
+        assert len(chunks) == 1
+        assert chunks[0].chunk_type == "checklist"
+        assert all(item in chunks[0].content for item in ("One", "Two", "Three"))
 
 
 class TestChecklistContextPrefix:
@@ -106,22 +115,35 @@ class TestChecklistContextPrefix:
     verbatim prefix -- still no synthesis, just not discarding context
     that already existed in the source."""
 
-    def test_checklist_items_prefixed_with_preamble(self):
-        text = "Required documents for your application:\n- Pay stubs\n- Bank statements"
-        chunks = list(chunk_checklist(text))
-        assert chunks[1].content == "Required documents for your application: - Pay stubs"
-        assert chunks[2].content == "Required documents for your application: - Bank statements"
+    VA_LIST = (
+        "Eligibility for a VA loan depends on service history, and "
+        "applicants fall into one of the following categories:\n"
+        "- Veterans who served the minimum active-duty service "
+        "requirement during wartime or peacetime\n"
+        "- Current serving members with at least ninety continuous days "
+        "of active duty under their belt"
+    )
+
+    def test_long_items_are_prefixed_with_their_preamble(self):
+        """Unchanged in substance: a split-out bullet must keep the words
+        its own topic is named by. Short lists are no longer split at all
+        (see TestShortListsStayWhole), so the case is stated with the
+        substantial items this rule was written for."""
+        items = [c for c in chunk_checklist(self.VA_LIST)
+                 if c.chunk_type == "checklist"]
+        assert len(items) == 2
+        assert all("VA loan" in c.content for c in items)
 
     def test_preamble_chunk_itself_is_not_double_prefixed(self):
-        text = "Required documents for your application:\n- Pay stubs"
-        chunks = list(chunk_checklist(text))
-        assert chunks[0].content == "Required documents for your application:"
+        preamble = [c for c in chunk_checklist(self.VA_LIST)
+                    if c.chunk_type == "paragraph"]
+        assert preamble
+        assert preamble[0].content.endswith("categories:")
 
-    def test_no_preamble_no_prefix_added(self):
-        text = "- One\n- Two"
-        chunks = list(chunk_checklist(text))
-        assert chunks[0].content == "- One"
-        assert chunks[1].content == "- Two"
+    def test_short_list_without_a_preamble_is_one_chunk(self):
+        chunks = list(chunk_checklist("- One\n- Two"))
+        assert len(chunks) == 1
+        assert "One" in chunks[0].content and "Two" in chunks[0].content
 
 
 class TestMinTokensMerge:
@@ -284,3 +306,182 @@ class TestDefinitionEntries:
         chunks = list(self._chunker().chunk(self._extracted(text)))
         assert [c.chunk_type for c in chunks] == ["table"]
         assert chunks[0].section == "Common ARM Structures"
+
+
+class TestListPreambleIsNotAHeading:
+    """Regression from ingesting a real 22-page procedure SOP.
+
+    ``_is_heading`` treats any short line ending in ":" as a heading, so
+    in the PDF path a list preamble like "The process ensures:" was
+    consumed as a *section* before chunk_checklist ever saw the block.
+    That chunker can only prefix its items with a preamble it can see, so
+    every bullet was emitted bare: 124 chunks averaging 20 characters,
+    like "- Fund Switches".
+
+    A chunk that short has almost no lexical signal for BM25 and a
+    near-meaningless embedding. The document indexed cleanly and then
+    answered almost nothing -- procedure questions scored 12.5%.
+
+    A colon-terminated line immediately followed by a list item is a
+    preamble, not a heading.
+    """
+
+    def _chunker(self):
+        return StructuralChunker()
+
+    def _pdf(self, text: str) -> ExtractedText:
+        return ExtractedText(text=text, pages=[text], source_format="pdf")
+
+    SOP = (
+        "The process ensures:\n"
+        "- Client retention\n"
+        "- Regulatory compliance\n"
+        "- Accurate CRM record keeping\n"
+    )
+
+    def test_preamble_stays_with_its_list(self):
+        chunks = list(self._chunker().chunk(self._pdf(self.SOP)))
+        assert chunks, "no chunks produced"
+        assert all("The process ensures" in c.content for c in chunks
+                   if c.chunk_type == "checklist"), [c.content for c in chunks]
+
+    def test_items_are_retrievable_sized(self):
+        """The failure was chunks too small to carry any search signal."""
+        chunks = list(self._chunker().chunk(self._pdf(self.SOP)))
+        checklist = [c for c in chunks if c.chunk_type == "checklist"]
+        assert checklist
+        assert all(len(c.content) > 30 for c in checklist), [
+            c.content for c in checklist
+        ]
+
+    def test_preamble_is_not_promoted_to_a_section(self):
+        chunks = list(self._chunker().chunk(self._pdf(self.SOP)))
+        assert all(c.section != "The process ensures:" for c in chunks)
+
+    def test_a_colon_line_keeps_its_content(self):
+        """Superseded an earlier expectation that "Objective:" becomes a
+        section. It should not: a trailing colon introduces content, and
+        splitting there separates the label from what it labels. See
+        TestColonLabelsAreNotSections for the measurement that changed
+        this."""
+        text = "Objective:\nTo contact clients approaching product expiry.\n"
+        chunks = list(self._chunker().chunk(self._pdf(text)))
+        assert any(
+            "Objective:" in c.content and "approaching product expiry" in c.content
+            for c in chunks
+        ), [(c.section, c.content) for c in chunks]
+
+    def test_uppercase_headings_still_become_sections(self):
+        text = (
+            "PHASE 1 - CLIENT RENEWAL\n"
+            "Contact clients whose products approach expiry.\n"
+        )
+        chunks = list(self._chunker().chunk(self._pdf(text)))
+        assert any(c.section == "PHASE 1 - CLIENT RENEWAL" for c in chunks)
+
+
+class TestColonLabelsAreNotSections:
+    """A trailing colon introduces content; it does not start a section.
+
+    Measured on the real SOP: "Every:" became a section and "3 weeks" --
+    its entire meaning -- became a 7-character chunk on its own. The
+    question "how often should PT rates be reviewed?" could not be
+    answered by any chunk, because no chunk contained both the label and
+    the value. The same shape orphaned "Include:", "Mark task:",
+    "Navigate to:" and "Check:" across the document.
+
+    Real section headings in a procedure document look like "PHASE 1 -
+    CLIENT RENEWAL" or "Step 1.1 - ...", not "Every:".
+    """
+
+    def _chunker(self):
+        return StructuralChunker()
+
+    def _pdf(self, text: str) -> ExtractedText:
+        return ExtractedText(text=text, pages=[text], source_format="pdf")
+
+    def test_label_and_value_stay_in_one_chunk(self):
+        chunks = list(self._chunker().chunk(self._pdf("Every:\n3 weeks\n")))
+        joined = " ".join(c.content for c in chunks)
+        assert "Every:" in joined and "3 weeks" in joined
+        assert any("Every:" in c.content and "3 weeks" in c.content for c in chunks), [
+            c.content for c in chunks
+        ]
+
+    def test_label_is_not_promoted_to_a_section(self):
+        chunks = list(self._chunker().chunk(self._pdf("Every:\n3 weeks\n")))
+        assert all(c.section != "Every:" for c in chunks)
+
+    def test_uppercase_headings_are_still_sections(self):
+        text = "PHASE 10 - ONGOING RATE MONITORING\nMaintain best client outcome.\n"
+        chunks = list(self._chunker().chunk(self._pdf(text)))
+        assert any(c.section == "PHASE 10 - ONGOING RATE MONITORING" for c in chunks)
+
+    def test_a_list_preamble_still_reaches_its_items(self):
+        text = "The process ensures:\n- Client retention\n- Regulatory compliance\n"
+        chunks = list(self._chunker().chunk(self._pdf(text)))
+        checklist = [c for c in chunks if c.chunk_type == "checklist"]
+        assert checklist
+        assert all("The process ensures" in c.content for c in checklist)
+
+
+class TestShortListsStayWhole:
+    """A list of short items is one retrieval unit, not several.
+
+    Splitting per item is right when each bullet is a substantial
+    statement (the VA-eligibility case this chunker was built for). It is
+    wrong when the items are two or three words: the real SOP produced
+    124 checklist chunks averaging 28 characters, like "- Loan amount".
+
+    Chunks that small are actively harmful, not merely useless. BM25
+    normalises by document length, so a 13-character chunk matching one
+    query word scores extremely high, and its embedding is dominated by
+    those two words. Measured: after the SOP was added, those fragments
+    outranked the glossary's own definitions and the glossary suite fell
+    from 51/52 to 46/52 -- "how can I calculate the value I have in my
+    property?" started answering "Enter: - Property address" instead of
+    the Equity definition.
+    """
+
+    def _chunker(self):
+        return StructuralChunker()
+
+    def _pdf(self, text: str) -> ExtractedText:
+        return ExtractedText(text=text, pages=[text], source_format="pdf")
+
+    SHORT_LIST = (
+        "Enter:\n"
+        "- Property address\n"
+        "- Valuation\n"
+        "- Outstanding balance\n"
+    )
+
+    def test_a_short_list_becomes_one_chunk(self):
+        chunks = [c for c in self._chunker().chunk(self._pdf(self.SHORT_LIST))
+                  if c.chunk_type == "checklist"]
+        assert len(chunks) == 1, [c.content for c in chunks]
+
+    def test_the_whole_list_is_retrievable_together(self):
+        chunks = [c for c in self._chunker().chunk(self._pdf(self.SHORT_LIST))
+                  if c.chunk_type == "checklist"]
+        content = chunks[0].content
+        for item in ("Property address", "Valuation", "Outstanding balance"):
+            assert item in content
+        assert "Enter:" in content
+
+    def test_substantial_items_are_still_split(self):
+        """The case this chunker exists for must keep working: each bullet
+        is a complete statement a query could match on its own."""
+        text = (
+            "Eligibility depends on service history, and applicants fall "
+            "into one of the following categories:\n"
+            "- Veterans who served the minimum active-duty service "
+            "requirement during wartime or peacetime\n"
+            "- Current serving members with at least ninety continuous "
+            "days of active duty under their belt\n"
+            "- Surviving spouses of service members who died in the line "
+            "of duty or from a service-connected disability\n"
+        )
+        chunks = [c for c in self._chunker().chunk(self._pdf(text))
+                  if c.chunk_type == "checklist"]
+        assert len(chunks) == 3, [c.content for c in chunks]

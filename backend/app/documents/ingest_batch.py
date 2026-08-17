@@ -32,6 +32,7 @@ from app.documents.indexing import index_document
 from app.documents.metadata_extraction import extract_metadata
 from app.documents.summarization import summarize_chunk
 from app.documents import upload_metadata
+from app.documents.ocr_cleanup import clean_ocr_pages
 from app.documents.text_extraction import extract_text, ExtractedText
 
 logging.basicConfig(level=settings.log_level, format="%(levelname)s %(name)s: %(message)s")
@@ -71,10 +72,18 @@ def _try_ocr_fallback(file_path: Path, extracted: ExtractedText) -> ExtractedTex
         from app.documents.ocr import ocr_pdf_pages
 
         ocr_pages = ocr_pdf_pages(file_path)
+        # Repair known Tesseract artifacts before anything downstream sees
+        # the text. Applied here rather than in extract_text because it
+        # must never touch text an extractor read directly (see
+        # ocr_cleanup's module docstring).
+        ocr_pages = clean_ocr_pages(ocr_pages)
         if ocr_pages:
             full_text = "\n".join(ocr_pages)
             if full_text.strip():
-                logger.info("OCR fallback produced %d chars for %s", len(full_text), file_path.name)
+                logger.info(
+                    "OCR fallback produced %d chars over %d pages for %s",
+                    len(full_text), len(ocr_pages), file_path.name,
+                )
                 return ExtractedText(
                     text=full_text,
                     pages=ocr_pages,
