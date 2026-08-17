@@ -125,7 +125,15 @@ CASES: list[tuple[str, str, object]] = [
     ("negative", "What is the maximum FHA loan amount?", NO_ANSWER),
     ("negative", "What is the current VA funding fee?", NO_ANSWER),
     ("negative", "What is the FHA upfront MIP percentage?", NO_ANSWER),
-    ("negative", "What documents are required for a mortgage application?", NO_ANSWER),
+    # Was a negative case when the glossary was the only document in the
+    # corpus. Moved to paraphrase once the SOP joined it (2026-08-17):
+    # "Step 2.3 — Upload Documents" genuinely lists the required
+    # documents ("Existing mortgage statements", "Mortgage offers",
+    # "Fact Find", "ID documents", ...), so a no_answer here would now be
+    # the system missing real content, not correctly declining. Ground
+    # truth was stale, not the retrieval.
+    ("paraphrase", "What documents are required for a mortgage application?",
+     [r"[Mm]ove all relevant documents into the folder"]),
     ("negative", "What is today's mortgage interest rate?", NO_ANSWER),
     ("negative", "How often should HVAC filters be replaced?", NO_ANSWER),
     ("negative", "What credit score do I need for a conventional loan?", NO_ANSWER),
