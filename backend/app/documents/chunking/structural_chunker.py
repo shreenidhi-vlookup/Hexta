@@ -594,6 +594,21 @@ class StructuralChunker:
         alignment ("col1 col2 col3") -- weaker signal, more prone to
         false-positiving on ordinary prose, but kept so plain tables that
         were already detected before this fix stay detected.
+
+        Measured live: a plain prose paragraph immediately following a
+        real markdown table ("Early Repayment Charge (ERC): A fee
+        charged by the current lender if the client repays or switches
+        away from their mortgage before the end of the...") was
+        misclassified as a table. Its first two wrapped lines happened
+        to split into the same word count under the loose any-whitespace
+        fallback -- pure coincidence of line-wrap width, not a real
+        column structure -- and `_consistent_columns`'s old floor
+        (any 2 matching lines, however many lines total) accepted that
+        as "consistent". `_consistent_columns` now requires matching
+        lines to be a majority, not just >= 2, so a real table (where
+        most or all rows share a column count) still passes while an
+        ordinary paragraph that coincidentally wraps two lines alike
+        does not.
         """
         lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
         if len(lines) < 2:
@@ -609,7 +624,12 @@ class StructuralChunker:
         if cell_counts[0] < 3:
             return False
         consistent_count = sum(1 for c in cell_counts if c == cell_counts[0])
-        return consistent_count >= 2
+        # Tolerate exactly one outlier line (a header/footer row with a
+        # different cell count) but require every other line to agree --
+        # a flat floor of "any 2 lines match" let a coincidental match
+        # between two wrapped prose lines pass as a "table" regardless of
+        # how many total lines were actually inconsistent.
+        return consistent_count >= max(2, len(lines) - 1)
 
     def _count_tokens(self, text: str) -> int:
         """Approximate token count (words * 1.3)."""
