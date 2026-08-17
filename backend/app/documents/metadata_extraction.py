@@ -46,6 +46,7 @@ def extract_metadata(
     file_path: str | Path,
     doc_type: str | None = None,
     department: str | None = None,
+    client_id: str | None = None,
 ) -> DocumentMetadata:
     """Infer metadata from file path and initial content lines.
 
@@ -61,6 +62,11 @@ def extract_metadata(
     ``department`` is never inferred — there is nothing in a document's
     text that reliably says who should be allowed to read it — so it falls
     back to the default rather than to a guess.
+
+    ``client_id`` is never inferred either, and never normalised: it is
+    already validated at the upload endpoint (``upload.py::_validate_client_id``),
+    and Intelliflo, not Hexta, owns its format — passed through verbatim
+    or left ``None``.
     """
     path = Path(file_path)
     title = _guess_title(extracted, path)
@@ -85,6 +91,7 @@ def extract_metadata(
         doc_type=resolved_type,
         department=resolved_department,
         source_path=source_path,
+        client_id=client_id or None,
     )
 
 

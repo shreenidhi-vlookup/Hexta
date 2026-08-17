@@ -421,7 +421,11 @@ export async function fetchDocumentCategories(
 export async function uploadDocument(
   file: File,
   token: string,
-  category?: { docType: string; department: string }
+  category?: { docType: string; department: string },
+  // Optional Intelliflo client reference (Stage 2, Task 5) — independent
+  // of category, so it's its own argument rather than folded into
+  // `category`, which the caller may omit entirely.
+  clientId?: string
 ): Promise<{
   message: string;
   filename: string;
@@ -430,12 +434,16 @@ export async function uploadDocument(
   indexing: boolean;
   doc_type: string | null;
   department: string | null;
+  client_id: string | null;
 }> {
   const form = new FormData();
   form.append("file", file);
   if (category) {
     form.append("doc_type", category.docType);
     form.append("department", category.department);
+  }
+  if (clientId) {
+    form.append("client_id", clientId);
   }
   const response = await fetch(`${API_BASE_URL}/documents/upload`, {
     method: "POST",

@@ -118,6 +118,7 @@ def process_file(file_path: Path) -> bool:
         file_path,
         doc_type=overrides.get("doc_type"),
         department=overrides.get("department"),
+        client_id=overrides.get("client_id"),
     )
     entities = extract_entities(extracted.text)
     logger.info(
