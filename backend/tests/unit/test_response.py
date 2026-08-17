@@ -597,3 +597,20 @@ class TestValidationMirrorsTheSearchFilter:
         """A client must not inherit the staff open-knowledge rule."""
         valid, _ = validate_package(self._package(client_id=None), self.CLIENT_A)
         assert valid is False
+
+    def test_assigned_processor_may_read_their_assigned_clients_document(self):
+        """Stage 2, Task 7: self-assignment (/me/clients) is the only path
+        from processor to a client's documents -- this must accept once
+        assigned, mirroring metadata_filters.py's SQL boundary exactly."""
+        assigned = {**self.PROCESSOR, "assigned_clients": ["CLIENT_A"]}
+        valid, reason = validate_package(
+            self._package(client_id="CLIENT_A"), assigned
+        )
+        assert valid is True, reason
+
+    def test_assignment_to_one_client_does_not_expose_another(self):
+        assigned = {**self.PROCESSOR, "assigned_clients": ["CLIENT_A"]}
+        valid, _ = validate_package(
+            self._package(client_id="CLIENT_B"), assigned
+        )
+        assert valid is False

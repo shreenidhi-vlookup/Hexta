@@ -32,12 +32,29 @@ class TestAdmin:
 
 
 class TestProcessor:
-    def test_processor_is_restricted_to_documents_with_no_client(self):
-        """The guard that makes client records safe to add later: opening
-        knowledge to all staff must not open client files with it."""
+    def test_unassigned_processor_is_restricted_to_documents_with_no_client(self):
+        """The guard that makes client records safe to add: opening
+        knowledge to all staff must not open client files with it. An
+        unassigned processor's `assigned_clients` is empty, and
+        `= ANY('{}')` is always false in Postgres, so this degrades to
+        exactly the pre-Stage-2 clause -- no special-casing needed."""
         clause, params = get_search_filter(PROCESSOR)
-        assert clause == "d.client_id IS NULL"
-        assert params == []
+        assert clause == "(d.client_id IS NULL OR d.client_id = ANY(%s))"
+        assert params == [[]]
+
+    def test_assigned_processor_reaches_their_assigned_clients_too(self):
+        """Stage 2, Task 7: self-assignment (/me/clients) is the only path
+        from processor to a client's documents."""
+        assigned = {**PROCESSOR, "assigned_clients": ["CLIENT_A", "CLIENT_B"]}
+        clause, params = get_search_filter(assigned)
+        assert clause == "(d.client_id IS NULL OR d.client_id = ANY(%s))"
+        assert params == [["CLIENT_A", "CLIENT_B"]]
+
+    def test_assignment_to_one_client_does_not_expose_another(self):
+        """The ANY(%s) list is exactly assigned_clients -- nothing wider."""
+        assigned = {**PROCESSOR, "assigned_clients": ["CLIENT_A"]}
+        _, params = get_search_filter(assigned)
+        assert "CLIENT_B" not in params[0]
 
     def test_processor_is_not_filtered_by_department(self):
         """Department is organisational metadata now, not a gate -- staff

@@ -13,7 +13,12 @@ every "no answer found" query returns HTTP 500 instead of a graceful
 
 from __future__ import annotations
 
-from app.auth.rbac import is_admin, is_client, resolve_user_client_id
+from app.auth.rbac import (
+    is_admin,
+    is_client,
+    resolve_user_assigned_clients,
+    resolve_user_client_id,
+)
 from app.response.package_builder import ResponsePackage
 
 
@@ -51,13 +56,21 @@ def validate_package(
                         f"not '{user_client_id}'"
                     )
         else:
-            # Staff: knowledge only, never a client's records.
+            # Staff: knowledge (no client), plus any client they have
+            # self-assigned to (/me/clients, api/v1/me.py). Must stay in
+            # lockstep with metadata_filters.py's staff branch -- the two
+            # disagreed once already (this file still enforced the retired
+            # department rule after the primary filter moved to client
+            # ownership) and a legitimate retrieval surfaced as an HTTP 500
+            # instead of an answer.
+            assigned_clients = resolve_user_assigned_clients(user)
             for excerpt in package.excerpts:
-                if excerpt.source.client_id is not None:
+                chunk_client_id = excerpt.source.client_id
+                if chunk_client_id is not None and chunk_client_id not in assigned_clients:
                     return False, (
                         f"RBAC violation: chunk {excerpt.source.chunk_id} "
-                        f"belongs to client_id '{excerpt.source.client_id}' "
-                        "and is not visible to staff"
+                        f"belongs to client_id '{chunk_client_id}', not "
+                        "assigned to this staff member"
                     )
 
     # Version and approval check — safety net
