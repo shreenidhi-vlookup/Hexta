@@ -143,3 +143,41 @@ class TestUploadedBy:
         doc.write_text("body")
         um.sidecar_path(doc).write_text('{"uploaded_by": "7"}')
         assert um.read_sidecar(doc) == {"uploaded_by": 7}
+
+
+class TestClientId:
+    """The sidecar also carries the optional client this document belongs
+    to (Task 5, Stage 2). Absent it stays unset, unchanged from before
+    this field existed -- a document with no client is firm-wide staff
+    knowledge, not a validation failure."""
+
+    def test_round_trips_the_client_id(self, tmp_path: Path):
+        doc = tmp_path / "d.txt"
+        doc.write_text("body")
+        um.write_sidecar(doc, "policy", "general", client_id="INTELLIFLO-4471")
+        assert um.read_sidecar(doc)["client_id"] == "INTELLIFLO-4471"
+
+    def test_absent_client_id_is_omitted(self, tmp_path: Path):
+        doc = tmp_path / "d.txt"
+        doc.write_text("body")
+        um.write_sidecar(doc, "policy", "general", client_id=None)
+        assert "client_id" not in um.read_sidecar(doc)
+
+    def test_client_id_alone_is_enough_to_write_a_sidecar(self, tmp_path: Path):
+        doc = tmp_path / "d.txt"
+        doc.write_text("body")
+        assert um.write_sidecar(doc, None, None, client_id="C-1") is not None
+        assert um.read_sidecar(doc) == {"client_id": "C-1"}
+
+    def test_coexists_with_category_fields(self, tmp_path: Path):
+        doc = tmp_path / "d.txt"
+        doc.write_text("body")
+        um.write_sidecar(
+            doc, "policy", "general", uploaded_by=7, client_id="C-1",
+        )
+        assert um.read_sidecar(doc) == {
+            "doc_type": "policy",
+            "department": "general",
+            "uploaded_by": 7,
+            "client_id": "C-1",
+        }
