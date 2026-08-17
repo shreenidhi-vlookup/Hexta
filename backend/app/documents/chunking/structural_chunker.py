@@ -204,9 +204,22 @@ class StructuralChunker:
         return [(title, body) for title, body in sections if body.strip()]
 
     def _is_heading(self, line: str) -> bool:
-        """Detect heading lines."""
+        """Detect heading lines.
+
+        A trailing colon deliberately does **not** make a heading. It
+        introduces content — a list, or a single value — and promoting it
+        to a section boundary separates the label from the thing it
+        labels. Measured on a real procedure SOP: "Every:" became a
+        section and "3 weeks", the entire answer, became a 7-character
+        chunk of its own, so "how often should rates be reviewed?" could
+        not be answered by any chunk in the document. The same shape
+        orphaned "Include:", "Mark task:", "Navigate to:" and "Check:".
+
+        Genuine headings in these documents are uppercase ("PHASE 1 —
+        CLIENT RENEWAL"), em-dash titles, or explicit section markers.
+        """
         if len(line) <= 80 and len(line.split()) <= 12:
-            if line.isupper() or line.endswith(":") or line.endswith("—"):
+            if line.isupper() or line.endswith("—"):
                 return True
             if line.startswith("§") or line.startswith("Section"):
                 return True
@@ -215,11 +228,54 @@ class StructuralChunker:
     def _chunk_section(
         self, body: str, section: str | None, page_num: int | None
     ) -> Iterator[Chunk]:
-        """Split a section body into chunks, preserving tables and checklists."""
+        """Split a section body into chunks, preserving tables and checklists.
+
+        List runs are gathered and handed to ``chunk_checklist`` as one
+        block, together with the colon-terminated line that introduces
+        them. Dispatching line by line meant that chunker never saw a
+        preamble and its items at the same time, so it could not do the
+        prefixing it exists to do — and every bullet was emitted bare.
+        """
+        from app.documents.chunking.checklist_chunker import _is_list_item
+
         paragraphs = body.split("\n")
         current: list[str] = []
+        index = 0
 
-        for para in paragraphs:
+        while index < len(paragraphs):
+            para = paragraphs[index]
+
+            # Gather a whole run of list items, with its preamble.
+            if para.strip() and _is_list_item(para.strip()):
+                run: list[str] = []
+                while index < len(paragraphs):
+                    line = paragraphs[index]
+                    if line.strip() and _is_list_item(line.strip()):
+                        run.append(line)
+                        index += 1
+                        continue
+                    break
+
+                preamble: list[str] = []
+                if current and current[-1].strip().endswith(":"):
+                    preamble = [current.pop()]
+                if current:
+                    yield from self._yield_text_chunk(current, section, page_num)
+                    current = []
+
+                for cc in chunk_checklist(
+                    "\n".join(preamble + run), section=section, page_number=page_num
+                ):
+                    yield Chunk(
+                        content=cc.content,
+                        section=cc.section,
+                        chunk_type=cc.chunk_type,
+                        page_number=cc.page_number,
+                    )
+                continue
+
+            index += 1
+
             if not para.strip():
                 if current:
                     yield from self._yield_text_chunk(current, section, page_num)
