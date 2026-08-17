@@ -39,10 +39,13 @@ class TestRBACPreFilter:
 
     def test_processor_clause_is_injected_into_where(self):
         """The clause must be non-empty and parameterised, so it can be
-        ANDed into the query rather than applied afterwards."""
+        ANDed into the query rather than applied afterwards. Stage 2's
+        assigned_clients param is a list (bound to ANY(%s)), not a scalar,
+        so this checks shape rather than a flat list of strings."""
         clause, params = get_search_filter(PROCESSOR)
         assert clause
-        assert all(isinstance(p, str) for p in params)
+        assert len(params) == 1
+        assert isinstance(params[0], list)
 
     def test_processor_reaches_across_departments(self):
         """The department barrier is deliberately gone: staff must not need
@@ -53,11 +56,21 @@ class TestRBACPreFilter:
         other_department = {**PROCESSOR, "department": "underwriting"}
         assert get_search_filter(other_department) == get_search_filter(PROCESSOR)
 
-    def test_client_owned_chunk_is_excluded_for_a_processor(self):
+    def test_client_owned_chunk_is_excluded_for_an_unassigned_processor(self):
         """The replacement boundary. A document tagged to a client must be
-        filtered out in SQL for staff, not trimmed from results later."""
-        clause, _ = get_search_filter(PROCESSOR)
-        assert clause == "d.client_id IS NULL"
+        filtered out in SQL for staff who haven't self-assigned to it, not
+        trimmed from results later."""
+        clause, params = get_search_filter(PROCESSOR)
+        assert clause == "(d.client_id IS NULL OR d.client_id = ANY(%s))"
+        assert params == [[]]
+
+    def test_client_owned_chunk_is_reachable_once_assigned(self):
+        """Stage 2, Task 7: self-assignment (/me/clients) is the only path
+        from processor to a client's documents."""
+        assigned = {**PROCESSOR, "assigned_clients": ["CLIENT_A"]}
+        clause, params = get_search_filter(assigned)
+        assert clause == "(d.client_id IS NULL OR d.client_id = ANY(%s))"
+        assert params == [["CLIENT_A"]]
 
     def test_restricted_chunk_never_reaches_the_reranker(self):
         """Both candidates below are plausible retrieval hits, and the
@@ -95,10 +108,11 @@ class TestRBACPreFilter:
         assert client_owned.bm25_score > allowed.bm25_score
 
         clause, params = get_search_filter(PROCESSOR)
-        # The row is excluded by ownership, and no parameter carries a
-        # client identifier that could be widened by accident.
-        assert clause == "d.client_id IS NULL"
-        assert params == []
+        # The row is excluded by ownership: an unassigned processor's
+        # ANY(%s) param is empty, so no client identifier is present to be
+        # widened by accident.
+        assert clause == "(d.client_id IS NULL OR d.client_id = ANY(%s))"
+        assert params == [[]]
 
     def test_client_is_scoped_to_their_own_documents(self):
         clause, params = get_search_filter(CLIENT_A)

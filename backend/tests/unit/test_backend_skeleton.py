@@ -181,8 +181,8 @@ class TestRBAC:
             "allowed_departments": ["compliance"],
         }
         clause, params = get_search_filter(user)
-        assert clause == "d.client_id IS NULL"
-        assert params == []
+        assert clause == "(d.client_id IS NULL OR d.client_id = ANY(%s))"
+        assert params == [[]]
 
 
 class TestEndpoints:
