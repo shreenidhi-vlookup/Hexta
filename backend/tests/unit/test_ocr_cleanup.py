@@ -239,3 +239,48 @@ class TestOcrPageByPage:
         assert len(pages) == 3
         assert pages[1] == ""
         assert "image-1" in pages[0] and "image-3" in pages[2]
+
+
+class TestListBlankLines:
+    """OCR emitted a blank line between every bullet.
+
+    Rasterised layout has no notion of "same list" -- vertical gaps
+    between items come back as blank lines, which every downstream
+    chunker reads as a block boundary. The consequence measured on the
+    real SOP: a list's preamble reached only the first item, and 118 of
+    124 checklist chunks were emitted bare at ~20 characters.
+
+    A blank line between two list items, or between a preamble and its
+    first item, is layout noise. A blank line before ordinary prose is a
+    real paragraph break and must survive.
+    """
+
+    def test_blank_lines_between_items_are_removed(self):
+        raw = "- Fund Switches\n\n- Rate Securing\n\n- Mortgage Reviews"
+        assert clean_ocr_text(raw) == (
+            "- Fund Switches\n- Rate Securing\n- Mortgage Reviews"
+        )
+
+    def test_blank_line_after_a_preamble_is_removed(self):
+        raw = "This SOP explains the process for handling:\n\n- Product Transfers"
+        assert clean_ocr_text(raw) == (
+            "This SOP explains the process for handling:\n- Product Transfers"
+        )
+
+    def test_paragraph_breaks_survive(self):
+        """A blank line between prose paragraphs is meaningful."""
+        raw = "First paragraph text.\n\nSecond paragraph text."
+        assert clean_ocr_text(raw) == raw
+
+    def test_blank_line_after_a_list_before_prose_survives(self):
+        raw = "- Rate Securing\n\nPHASE 1 - CLIENT RENEWAL"
+        assert clean_ocr_text(raw) == raw
+
+    def test_blank_line_before_a_list_after_prose_survives(self):
+        """Only a colon-terminated preamble binds to the list below it."""
+        raw = "Some ordinary sentence.\n\n- Rate Securing"
+        assert clean_ocr_text(raw) == raw
+
+    def test_numbered_items_are_joined_too(self):
+        raw = "1. Submitted to Provider\n\n2. Offer Made"
+        assert clean_ocr_text(raw) == "1. Submitted to Provider\n2. Offer Made"
