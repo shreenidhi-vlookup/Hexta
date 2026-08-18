@@ -76,6 +76,39 @@ class TestTableDetection:
         )
         assert not self._chunker()._is_table_block(prose)
 
+    def test_wrapped_prose_with_coincidentally_matching_line_lengths(self):
+        """Found live via manual upload testing: this exact paragraph
+        (from a real test document, sitting right after a real markdown
+        table) was misclassified as a table. Its first two wrapped lines
+        happen to split into the same word count (13) under the loose
+        any-whitespace fallback -- pure coincidence of line-wrap width --
+        while the old floor (any 2 matching lines, regardless of how many
+        lines total) accepted that as "consistent columns". Answering
+        "What is an Early Repayment Charge?" then returned a garbled
+        mid-sentence fragment instead of the clean definition, because
+        table-typed chunks are packaged differently downstream than a
+        normal definition/paragraph chunk."""
+        erc_definition = (
+            "Early Repayment Charge (ERC): A fee charged by the current lender if the\n"
+            "client repays or switches away from their mortgage before the end of the\n"
+            "agreed deal period, usually calculated as a percentage of the outstanding\n"
+            "balance."
+        )
+        assert not self._chunker()._is_table_block(erc_definition)
+
+    def test_real_table_with_one_outlier_header_still_detected(self):
+        """The fix must not overcorrect: a real table where every data
+        row shares a column count, but a header row diverges, must still
+        be detected -- tolerating exactly one outlier line is the point,
+        not requiring every single line to match."""
+        table_text = (
+            "Product Type       Typical Term   ERC Applies\n"
+            "2-Year Fixed       2 years        Yes\n"
+            "5-Year Fixed       5 years        Yes\n"
+            "Tracker            2 years        No"
+        )
+        assert self._chunker()._is_table_block(table_text)
+
 
 class TestChecklistPreambleLabel:
     def test_short_list_keeps_its_preamble_in_one_unit(self):

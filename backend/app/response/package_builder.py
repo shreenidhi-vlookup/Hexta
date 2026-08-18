@@ -167,6 +167,34 @@ def _is_heading(sentence: str) -> bool:
     return len(s) <= _HEADING_MAX_CHARS
 
 
+_WRAPPED_LINE_RE = re.compile(r"(?<=[^\s.!?])\n(?=[a-z])")
+
+
+def _join_wrapped_lines(text: str) -> str:
+    """Collapse a source document's typographic hard-wraps back into prose.
+
+    Chunk text can carry the source's original line-wrap newlines verbatim
+    (this repo's chunkers don't rejoin wrapped paragraph lines). Downstream,
+    both `_strip_leading_heading` and `_SENTENCE_RE` treat *any* `\\n` as a
+    real structural break -- correct for a heading/label stacked above its
+    sentence (see `TestExtractAnswerPhraseMultilineChunk`), wrong for a
+    single sentence that merely wrapped at ~75 columns. Verified live: "Rate
+    Lock Window: A client may lock a rate up to 6 months before their\\n
+    current deal ends..." -- `_strip_leading_heading` saw the first wrapped
+    line (70 chars, no terminal punctuation) and dropped it whole as a
+    "heading", discarding the "6 months" the question was asking for.
+
+    A wrapped continuation line is distinguished from a genuine next
+    heading/label/sentence by two signals together: the line above doesn't
+    end in terminal punctuation, and the next line opens with a lowercase
+    word (headings and new sentences are capitalized). Only then is the
+    newline replaced with a space. A blank-line paragraph break is
+    untouched regardless -- the character right after such a `\\n` is
+    another `\\n`, never a lowercase letter, so it can't match.
+    """
+    return _WRAPPED_LINE_RE.sub(" ", text)
+
+
 def _strip_leading_heading(text: str) -> str:
     """Drop a leading line that looks like a section heading.
 
@@ -456,6 +484,7 @@ def _extract_answer_phrase(
     """
     if not text:
         return ""
+    text = _join_wrapped_lines(text)
     text = _strip_leading_heading(text)
     groups = content_term_groups(query_text) if query_text else []
     wants_number = bool(re.search(r"\d", query_text or ""))
@@ -602,13 +631,27 @@ def build_response_package(
     # reverted. The re-sort is compensating for cross-encoder ranking
     # errors; removing it needs a better top-1 ranker first, not a
     # different tie-break.
+    # Confidence (retrieval's own signal) sits between relevance and
+    # phrase_hits -- it only ever decides a comparison when relevance has
+    # already tied, so it can't override rel the way the reverted "make
+    # retrieval order authoritative" attempt did (that removed
+    # relevance-based reordering outright and broke a case where the
+    # cross-encoder itself ranked wrong -- see the note above). This is
+    # narrower: verified live for "Can I lock in an interest rate?" --
+    # Rate Lock Window (100% confidence) and Discount Points (93.3%) tied
+    # exactly on relevance (0.6667 == 0.6667, plain word overlap), and the
+    # phrase_hits signal alone flipped the pick to Discount Points because
+    # it happens to contain the query's literal "interest rate" phrase
+    # while Rate Lock Window -- the actually-correct, clearly
+    # higher-confidence chunk -- says "lock a rate" instead. Confidence
+    # breaks that tie before phrase_hits gets a vote.
     def _phrase_rank(e: Excerpt) -> tuple:
         rel = round(relevance_factor(query_text, e.text), 2)
         hits = _phrase_hits(e.text, query_phrases)
         not_teaser = not e.text.rstrip().endswith(":")
         if query_wants_number:
-            return (bool(re.search(r"\d", e.text)), rel, hits, not_teaser)
-        return (rel, hits, not_teaser)
+            return (bool(re.search(r"\d", e.text)), rel, e.confidence, hits, not_teaser)
+        return (rel, e.confidence, hits, not_teaser)
 
     def _phrase_from(e: Excerpt) -> str:
         if e.source.chunk_type in ("table", "checklist"):
