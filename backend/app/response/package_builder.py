@@ -167,6 +167,34 @@ def _is_heading(sentence: str) -> bool:
     return len(s) <= _HEADING_MAX_CHARS
 
 
+_WRAPPED_LINE_RE = re.compile(r"(?<=[^\s.!?])\n(?=[a-z])")
+
+
+def _join_wrapped_lines(text: str) -> str:
+    """Collapse a source document's typographic hard-wraps back into prose.
+
+    Chunk text can carry the source's original line-wrap newlines verbatim
+    (this repo's chunkers don't rejoin wrapped paragraph lines). Downstream,
+    both `_strip_leading_heading` and `_SENTENCE_RE` treat *any* `\\n` as a
+    real structural break -- correct for a heading/label stacked above its
+    sentence (see `TestExtractAnswerPhraseMultilineChunk`), wrong for a
+    single sentence that merely wrapped at ~75 columns. Verified live: "Rate
+    Lock Window: A client may lock a rate up to 6 months before their\\n
+    current deal ends..." -- `_strip_leading_heading` saw the first wrapped
+    line (70 chars, no terminal punctuation) and dropped it whole as a
+    "heading", discarding the "6 months" the question was asking for.
+
+    A wrapped continuation line is distinguished from a genuine next
+    heading/label/sentence by two signals together: the line above doesn't
+    end in terminal punctuation, and the next line opens with a lowercase
+    word (headings and new sentences are capitalized). Only then is the
+    newline replaced with a space. A blank-line paragraph break is
+    untouched regardless -- the character right after such a `\\n` is
+    another `\\n`, never a lowercase letter, so it can't match.
+    """
+    return _WRAPPED_LINE_RE.sub(" ", text)
+
+
 def _strip_leading_heading(text: str) -> str:
     """Drop a leading line that looks like a section heading.
 
@@ -456,6 +484,7 @@ def _extract_answer_phrase(
     """
     if not text:
         return ""
+    text = _join_wrapped_lines(text)
     text = _strip_leading_heading(text)
     groups = content_term_groups(query_text) if query_text else []
     wants_number = bool(re.search(r"\d", query_text or ""))
