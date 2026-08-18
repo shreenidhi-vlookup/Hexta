@@ -22,7 +22,12 @@ issue, it silently turned a well-retrieved, high-confidence excerpt into
 
 from __future__ import annotations
 
-from app.response.package_builder import _extract_answer_phrase, _is_heading
+from app.ranking.rrf import RankedCandidate
+from app.response.package_builder import (
+    _extract_answer_phrase,
+    _is_heading,
+    build_response_package,
+)
 
 
 class TestIsHeading:
@@ -138,3 +143,64 @@ class TestExtractAnswerPhraseWrappedProse:
         )
         phrase = _extract_answer_phrase(content)
         assert phrase.startswith("Required documents for confirming")
+
+
+class TestPhraseRankRespectsRetrievalConfidence:
+    """Found live via manual upload testing: "Can I lock in an interest
+    rate?" retrieved the correct chunk (Rate Lock Window) at 100%
+    confidence, clearly ahead of an unrelated chunk (Discount Points) at
+    93.3% -- yet the answer_phrase came from Discount Points anyway.
+
+    Root cause, confirmed by direct measurement: `_phrase_rank`'s tie-break
+    tuple is `(relevance, phrase_hits, not_teaser)` and never looks at
+    retrieval confidence at all. Both excerpts tie exactly on relevance
+    (0.6667 == 0.6667, plain word-overlap). The query's only adjacent
+    content-word phrase is "interest rate" (from "lock **in an interest
+    rate**"); it appears literally in the Discount Points chunk ("reduce
+    the interest rate on a loan") but not in Rate Lock Window's text
+    (which says "lock a rate", not "interest rate"). So a phrase-hit
+    tie-break flips a 100-vs-93.3 confidence lead to the wrong excerpt.
+
+    Fix: retrieval confidence becomes a tie-break signal too, inserted
+    between relevance and phrase_hits -- it only engages when relevance is
+    already tied (the common case this bug lives in), so it doesn't touch
+    cases where relevance itself already decides the winner (see the
+    reverted "make retrieval order authoritative" note above `_phrase_rank`
+    -- that removed relevance-based reordering entirely and broke a
+    different case; this is deliberately narrower).
+    """
+
+    def test_confidence_breaks_a_relevance_tie(self):
+        candidates = [
+            RankedCandidate(
+                chunk_id=1,
+                content=(
+                    "Rate Lock Window: A client may lock a rate up to 6 months "
+                    "before their current deal ends, giving time to compare "
+                    "products without losing the option to switch lenders if a "
+                    "better rate appears later."
+                ),
+                document_id=1, title="Remortgage Guide", section=None,
+                chunk_type="definition", department="general",
+                bm25_score=0.9, vec_score=0.95, rrf_score=0.0164, combined_rank=1,
+                is_approved=True, document_version=1,
+            ),
+            RankedCandidate(
+                chunk_id=2,
+                content=(
+                    "Points (Discount Points): Optional upfront fees paid at "
+                    "closing to reduce the interest rate on a loan, with one "
+                    "point typically equal to 1% of the loan amount."
+                ),
+                document_id=2, title="Mortgage Glossary", section=None,
+                chunk_type="definition", department="general",
+                bm25_score=0.6, vec_score=0.55, rrf_score=0.0153, combined_rank=2,
+                is_approved=True, document_version=1,
+            ),
+        ]
+        package = build_response_package(
+            candidates=candidates,
+            query_text="Can I lock in an interest rate?",
+        )
+        assert package.excerpts[0].confidence > package.excerpts[1].confidence
+        assert package.answer_phrase.startswith("Rate Lock Window")
