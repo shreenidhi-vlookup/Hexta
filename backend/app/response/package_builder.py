@@ -631,13 +631,27 @@ def build_response_package(
     # reverted. The re-sort is compensating for cross-encoder ranking
     # errors; removing it needs a better top-1 ranker first, not a
     # different tie-break.
+    # Confidence (retrieval's own signal) sits between relevance and
+    # phrase_hits -- it only ever decides a comparison when relevance has
+    # already tied, so it can't override rel the way the reverted "make
+    # retrieval order authoritative" attempt did (that removed
+    # relevance-based reordering outright and broke a case where the
+    # cross-encoder itself ranked wrong -- see the note above). This is
+    # narrower: verified live for "Can I lock in an interest rate?" --
+    # Rate Lock Window (100% confidence) and Discount Points (93.3%) tied
+    # exactly on relevance (0.6667 == 0.6667, plain word overlap), and the
+    # phrase_hits signal alone flipped the pick to Discount Points because
+    # it happens to contain the query's literal "interest rate" phrase
+    # while Rate Lock Window -- the actually-correct, clearly
+    # higher-confidence chunk -- says "lock a rate" instead. Confidence
+    # breaks that tie before phrase_hits gets a vote.
     def _phrase_rank(e: Excerpt) -> tuple:
         rel = round(relevance_factor(query_text, e.text), 2)
         hits = _phrase_hits(e.text, query_phrases)
         not_teaser = not e.text.rstrip().endswith(":")
         if query_wants_number:
-            return (bool(re.search(r"\d", e.text)), rel, hits, not_teaser)
-        return (rel, hits, not_teaser)
+            return (bool(re.search(r"\d", e.text)), rel, e.confidence, hits, not_teaser)
+        return (rel, e.confidence, hits, not_teaser)
 
     def _phrase_from(e: Excerpt) -> str:
         if e.source.chunk_type in ("table", "checklist"):
