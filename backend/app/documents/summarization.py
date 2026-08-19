@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import logging
 
-from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
+from sumy.parsers.plaintext import PlaintextParser
 from sumy.summarizers.lsa import LsaSummarizer
 
 logger = logging.getLogger(__name__)

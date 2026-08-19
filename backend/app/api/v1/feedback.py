@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.dependencies import require_auth
 from app.db.postgres.session import acquire
+from app.dependencies import require_auth
 
 router = APIRouter()
 

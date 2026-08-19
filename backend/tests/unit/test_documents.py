@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from app.documents import categories
-from app.documents.entity_extraction import extract_entities
-from app.documents.validation import validate_upload
 from app.documents.chunking.structural_chunker import StructuralChunker
-from app.documents.text_extraction import ExtractedText, extract_text
+from app.documents.entity_extraction import extract_entities
 from app.documents.metadata_extraction import extract_metadata
+from app.documents.text_extraction import ExtractedText, extract_text
+from app.documents.validation import validate_upload
 
 
 class TestValidation:

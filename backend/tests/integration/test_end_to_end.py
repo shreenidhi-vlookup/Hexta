@@ -49,9 +49,9 @@ BENCHMARK_USER = {
 @pytest.fixture(scope="module")
 def seeded_db():
     """Seed test data for integration tests, then clean up."""
-    from app.db.postgres.session import acquire
     from app.db.postgres.schema import ensure_schema
-    from evaluation.datasets.seed_benchmark_data import seed_benchmark_data, clear_benchmark_data
+    from app.db.postgres.session import acquire
+    from evaluation.datasets.seed_benchmark_data import clear_benchmark_data, seed_benchmark_data
 
     ensure_schema()
     clear_benchmark_data()

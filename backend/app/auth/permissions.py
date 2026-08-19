@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
-from app.auth.rbac import CLIENT_ROLES, STAFF_ROLE_HIERARCHY as _HIERARCHY
+from app.auth.rbac import CLIENT_ROLES
+from app.auth.rbac import STAFF_ROLE_HIERARCHY as _HIERARCHY
 
 # _HIERARCHY (super_admin > admin > processor) lives in rbac.py as the
 # single source of truth, alongside CLIENT_ROLES — module-level assertions

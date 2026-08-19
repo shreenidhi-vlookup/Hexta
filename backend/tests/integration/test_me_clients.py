@@ -16,8 +16,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1 import me
-from app.db.postgres.session import acquire
 from app.db.postgres.schema import ensure_schema
+from app.db.postgres.session import acquire
 
 
 def _db_available() -> bool:

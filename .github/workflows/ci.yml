@@ -48,6 +48,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
+      - name: Lint (ruff)
+        run: |
+          ruff check backend/app backend/tests evaluation
+
+      - name: Audit Python dependencies (report-only)
+        # pip-audit -r requirements.txt tries to re-resolve the whole
+        # dependency tree from scratch and hits a real, pre-existing
+        # Pillow version conflict unrelated to this step -- auditing the
+        # environment actually installed above (same set a real
+        # deployment gets) avoids that and is what pip-audit is designed
+        # for anyway. Non-blocking on first landing: a real run already
+        # found 3 known CVEs (pdfminer-six, pytest) with no CI history to
+        # judge against yet -- upgrading them is its own reviewed change,
+        # not something this lint step should silently force through.
+        run: |
+          pip install pip-audit
+          pip-audit || echo "pip-audit found issues above -- non-blocking for now, see step summary"
+
       - name: Install pgvector extension
         env:
           PGPASSWORD: adminpass
@@ -58,6 +76,20 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+
+      - name: Lint frontend (eslint)
+        working-directory: frontend
+        run: |
+          npm run lint
+
+      - name: Audit frontend dependencies (report-only)
+        # A real run already found 6 high-severity CVEs, all in Next.js
+        # itself, fixable only via a breaking major-version upgrade
+        # (14.x -> 16.x). That's a real, separate migration task, not
+        # something a lint-tooling step should force through unreviewed.
+        working-directory: frontend
+        run: |
+          npm audit --audit-level=high || echo "npm audit found issues above -- non-blocking for now, see step summary"
 
       - name: Build frontend
         working-directory: frontend
@@ -72,7 +104,7 @@ jobs:
           PGPASSWORD: adminpass
         run: |
           cd backend
-          python -m pytest tests/unit/ -v --timeout=60
+          python -m pytest tests/unit/ -v --timeout=60 --cov=app --cov-report=term-missing --cov-fail-under=75
 
       - name: Run integration tests
         env:

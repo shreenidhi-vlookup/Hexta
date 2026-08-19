@@ -24,11 +24,11 @@ if str(backend_path) not in sys.path:
     sys.path.insert(0, str(backend_path))
 
 from evaluation.datasets.eval_questions import load_dataset
-from evaluation.metrics.precision_recall import precision_at_k, recall_at_k
-from evaluation.metrics.mrr import mean_reciprocal_rank
-from evaluation.metrics.ndcg import ndcg_at_k
 from evaluation.metrics.hit_rate import hit_rate
 from evaluation.metrics.latency_benchmark import measure_latency, percentile_latencies
+from evaluation.metrics.mrr import mean_reciprocal_rank
+from evaluation.metrics.ndcg import ndcg_at_k
+from evaluation.metrics.precision_recall import precision_at_k, recall_at_k
 
 
 def _try_retrieval_phase(dataset: list[dict]) -> tuple[dict, bool]:
@@ -41,11 +41,14 @@ def _try_retrieval_phase(dataset: list[dict]) -> tuple[dict, bool]:
     Also records end-to-end search latencies for the latency benchmark.
     """
     try:
-        from app.db.postgres.session import acquire
         from app.api.v1.search import _rank_sub_query
         from app.config import settings
+        from app.db.postgres.session import acquire
         from app.ranking.reranker import rerank
-        from evaluation.datasets.seed_benchmark_data import seed_benchmark_data, clear_benchmark_data
+        from evaluation.datasets.seed_benchmark_data import (
+            clear_benchmark_data,
+            seed_benchmark_data,
+        )
     except (ImportError, Exception):
         return {}, False
 
@@ -322,6 +325,7 @@ def run_benchmark(output_dir: str = "evaluation/reports") -> dict:
             # Cold-start latency (embedding model loading)
             try:
                 import importlib
+
                 import app.search.pgvector_search as pvs_mod
                 importlib.reload(pvs_mod)
                 cold_lat = measure_latency(
@@ -378,13 +382,13 @@ def main():
     print(f"  Avg query proc latency: {summary['avg_query_processing_latency_ms']:.1f}ms")
     print(f"  Total latency:          {summary['total_latency_ms']:.1f}ms")
     if "retrieval_metrics" in results and "status" not in results["retrieval_metrics"]:
-        print(f"\n  --- Retrieval Quality ---")
+        print("\n  --- Retrieval Quality ---")
         for key, val in results["retrieval_metrics"].items():
             print(f"  {key:20s} {val:.1%}")
     else:
-        print(f"\n  Retrieval Quality: skipped (no DB)")
+        print("\n  Retrieval Quality: skipped (no DB)")
     if "latency_metrics" in results:
-        print(f"\n  --- Latency ---")
+        print("\n  --- Latency ---")
         for metric_name, vals in results["latency_metrics"].items():
             if isinstance(vals, dict) and "status" not in vals:
                 p50 = vals.get("p50_ms", vals.get("first_query_ms", "?"))

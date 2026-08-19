@@ -1,6 +1,7 @@
 pytest==8.3.4
 pytest-cov==5.0.0
 pytest-timeout==2.3.1
+ruff==0.16.3
 
 # Starlette's TestClient (used via fastapi.testclient) deprecated httpx in
 # favor of httpx2 -- without this, every test run logs

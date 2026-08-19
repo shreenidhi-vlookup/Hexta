@@ -15,7 +15,6 @@ from collections import defaultdict
 
 from app.db.postgres.session import acquire
 
-
 BENCHMARK_DOCS = [
     {
         "title": "Mortgage Eligibility Guidelines",
@@ -139,8 +138,9 @@ def seed_benchmark_data() -> dict[str, set[int]]:
 
             # Generate embedding vectors for all chunks (required for vector search)
             try:
-                from app.search.pgvector_search import embed_query
                 import numpy as np
+
+                from app.search.pgvector_search import embed_query
 
                 cur.execute("SELECT id, content FROM document_chunks WHERE embedding IS NULL")
                 rows = cur.fetchall()
@@ -182,6 +182,6 @@ def clear_benchmark_data() -> None:
 
 if __name__ == "__main__":
     topics = seed_benchmark_data()
-    print(f"Seeded benchmark data. Topic mapping:")
+    print("Seeded benchmark data. Topic mapping:")
     for topic, ids in sorted(topics.items()):
         print(f"  {topic}: {ids}")
