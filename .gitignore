@@ -63,3 +63,8 @@ backend/storage/
 # Claude Code plugins (installed locally via /plugin install; not project code)
 .claude/plugins/*
 !.claude/plugins/.gitkeep
+
+# Machine-specific local Claude Code settings (absolute paths, local
+# permission overrides) -- must never be tracked, regardless of any
+# global gitignore rule on a given developer's machine.
+.claude/settings.local.json
