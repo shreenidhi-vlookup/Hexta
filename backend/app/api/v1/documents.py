@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth.permissions import require_role
-from app.dependencies import require_auth
 from app.db.postgres.session import acquire
+from app.dependencies import require_auth
 from app.documents import categories
 
 router = APIRouter()

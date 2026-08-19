@@ -16,11 +16,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.query_processing import comparison, domain_terms
+from app.query_processing import (
+    comparison,
+    domain_terms,
+    intent_detection,
+    multi_question,
+    normalization,
+    spell_correction,
+)
 from app.query_processing import entity_extraction as ent
-from app.query_processing import intent_detection, multi_question, normalization
 from app.query_processing import query_expansion as qexpand
-from app.query_processing import spell_correction
 
 
 @dataclass

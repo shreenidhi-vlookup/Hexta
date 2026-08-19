@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import pytest
 
-from app.db.postgres.session import acquire
-from app.db.postgres.schema import ensure_schema
-from app.search.hybrid_orchestrator import search_knowledge_base
 from app.auth.rbac import is_client, resolve_user_client_id
+from app.db.postgres.schema import ensure_schema
+from app.db.postgres.session import acquire
+from app.search.hybrid_orchestrator import search_knowledge_base
 
 
 def _db_available() -> bool:
@@ -197,7 +197,6 @@ class TestClientIsolation:
                 user=CLIENT_A_USER,
             )
 
-        client_a_chunk_ids = {seeded_client_document["chunk_a"]}
         retrieved_ids = {c.chunk_id for c in result.candidates}
 
         # Client A should see their own chunk

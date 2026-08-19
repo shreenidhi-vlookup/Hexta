@@ -118,8 +118,7 @@ class TestSingleEnforcementPoint:
         assert not hasattr(rbac, "get_search_filter")
 
     def test_orchestrator_uses_the_metadata_filters_implementation(self):
-        from app.search import hybrid_orchestrator
-        from app.search import metadata_filters
+        from app.search import hybrid_orchestrator, metadata_filters
 
         assert hybrid_orchestrator.get_search_filter is (
             metadata_filters.get_search_filter

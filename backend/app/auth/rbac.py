@@ -11,7 +11,6 @@ safety net (CLAUDE.md rule #1).
 
 from __future__ import annotations
 
-
 # Default department if none specified.
 DEFAULT_DEPARTMENT: str = "general"
 

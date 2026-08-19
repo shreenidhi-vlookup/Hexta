@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.ranking.rrf import RankedCandidate
 from app.response.confidence_thresholds import route_by_confidence
 from app.response.package_builder import (
     ResponsePackage,
@@ -11,7 +12,6 @@ from app.response.package_builder import (
     build_response_package,
 )
 from app.response.validation import validate_package
-from app.ranking.rrf import RankedCandidate
 
 
 class TestConfidenceThresholds:
