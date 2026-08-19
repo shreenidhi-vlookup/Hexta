@@ -2,3 +2,11 @@ pytest==8.3.4
 pytest-cov==5.0.0
 pytest-timeout==2.3.1
 ruff==0.16.3
+
+# Starlette's TestClient (used via fastapi.testclient) deprecated httpx in
+# favor of httpx2 -- without this, every test run logs
+# "StarletteDeprecationWarning: Using httpx with starlette.testclient is
+# deprecated; install httpx2 instead." Verified live: installing this
+# silences the warning with no other change (582 passed / 5 pre-existing
+# failures, unchanged).
+httpx2==2.12.0

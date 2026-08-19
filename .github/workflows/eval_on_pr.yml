@@ -1,5 +1,17 @@
 name: Evaluation on PR
 
+# Runs on two triggers that share one job:
+# - pull_request: benchmarks the PR branch, then diffs it against the most
+#   recent baseline artifact produced by a push to main (below).
+# - push to main: benchmarks main itself and publishes that report as the
+#   new baseline artifact for future PRs to diff against.
+#
+# The comparison used to glob evaluation/reports/*.json for "the two most
+# recent files" -- fragile even before two report JSONs were accidentally
+# committed to the repo (removed in this same change) and permanently
+# poisoned every comparison with a frozen, ancient baseline. An explicit
+# baseline artifact, downloaded by name from main's own latest run, is the
+# only thing a PR should ever be compared against.
 on:
   pull_request:
     branches: [main]
@@ -9,6 +21,17 @@ on:
       - "backend/app/response/**"
       - "backend/app/query_processing/**"
       - "evaluation/**"
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/search/**"
+      - "backend/app/ranking/**"
+      - "backend/app/response/**"
+      - "backend/app/query_processing/**"
+      - "evaluation/**"
+
+env:
+  BASELINE_ARTIFACT_NAME: eval-baseline-main
 
 jobs:
   benchmark:
@@ -71,37 +94,77 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/backend
         run: |
           python -m evaluation.run_benchmark --output-dir evaluation/reports
+          # Pin the report to a fixed, predictable filename for the steps
+          # below -- the run's own timestamped name doesn't matter once
+          # it's the only file being uploaded/downloaded by artifact name.
+          latest="$(ls -t evaluation/reports/*.json | head -n1)"
+          cp "$latest" evaluation/reports/current.json
+
+      # --- main branch: publish this run's report as the new baseline ---
+      - name: Upload baseline artifact (main only)
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BASELINE_ARTIFACT_NAME }}
+          path: evaluation/reports/current.json
+          retention-days: 90
+
+      # --- PR: fetch main's latest baseline and diff against it ---
+      - name: Download baseline artifact from main (PR only)
+        if: github.event_name == 'pull_request'
+        id: baseline
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: eval_on_pr.yml
+          branch: main
+          name: ${{ env.BASELINE_ARTIFACT_NAME }}
+          path: evaluation/baseline
+          search_artifacts: true
 
       - name: Check for regression
+        if: github.event_name == 'pull_request'
         run: |
           python -c "
-          import json, glob
-          reports = sorted(glob.glob('evaluation/reports/*.json'), reverse=True)
-          if len(reports) < 2:
-              print('Not enough reports for comparison, skipping regression check')
-              exit(0)
-          latest = json.load(open(reports[0]))
-          previous = json.load(open(reports[1]))
-          latest_summary = latest.get('summary', {})
-          previous_summary = previous.get('summary', {})
+          import json, os
+
+          current = json.load(open('evaluation/reports/current.json'))
+          baseline_path = 'evaluation/baseline/current.json'
+          if not os.path.exists(baseline_path):
+              print('No baseline artifact found from main yet (first run after this '
+                    'workflow changed, or main has never produced one) -- skipping '
+                    'relative comparison. Absolute floor thresholds still apply below.')
+              previous_summary = {}
+              previous_retrieval = {}
+          else:
+              previous = json.load(open(baseline_path))
+              previous_summary = previous.get('summary', {})
+              previous_retrieval = previous.get('retrieval_metrics', {})
+
+          latest_summary = current.get('summary', {})
+          latest_retrieval = current.get('retrieval_metrics', {})
           threshold = 0.05
           regression = False
+
           for metric in ['sub_question_accuracy', 'intent_accuracy', 'entity_accuracy']:
+              if metric not in previous_summary:
+                  continue
               delta = latest_summary.get(metric, 0) - previous_summary.get(metric, 0)
               if delta < -threshold:
                   print(f'REGRESSION: {metric} dropped by {delta:.3f} (threshold: -{threshold})')
                   regression = True
               print(f'{metric}: {previous_summary.get(metric, 0):.3f} -> {latest_summary.get(metric, 0):.3f} (delta: {delta:+.3f})')
-          # Check retrieval metrics if available
-          latest_retrieval = latest.get('retrieval_metrics', {})
-          previous_retrieval = previous.get('retrieval_metrics', {})
+
           if 'hit_rate@10' in latest_retrieval and 'hit_rate@10' in previous_retrieval:
               delta = latest_retrieval['hit_rate@10'] - previous_retrieval['hit_rate@10']
               if delta < -threshold:
                   print(f'REGRESSION: hit_rate@10 dropped by {delta:.3f} (threshold: -{threshold})')
                   regression = True
               print(f'hit_rate@10: {previous_retrieval[\"hit_rate@10\"]:.3f} -> {latest_retrieval[\"hit_rate@10\"]:.3f} (delta: {delta:+.3f})')
-          # Absolute floor thresholds (fail if below)
+
+          # Absolute floor thresholds (fail if below) -- independent of
+          # whether a baseline was available at all.
           floors = {
               'hit_rate@10': 0.85,
               'mrr': 0.70,
@@ -112,6 +175,7 @@ jobs:
               if val is not None and val < floor:
                   print(f'THRESHOLD BREACH: {metric}={val:.3f} < floor={floor}')
                   regression = True
+
           if regression:
               exit(1)
           print('No significant regression detected')

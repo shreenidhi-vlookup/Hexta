@@ -117,30 +117,10 @@ jobs:
           cd backend
           python -m pytest tests/integration/ -v --timeout=120
 
-  benchmark:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: .
-        shell: bash
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install backend dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-          pip install pytest
-      - name: Run evaluation benchmark
-        run: |
-          python -m evaluation.run_benchmark --output-dir evaluation/reports
-      - name: Upload benchmark report
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-report
-          path: evaluation/reports/
+  # The benchmark job that used to live here ran on every PR regardless of
+  # path, had no Postgres service or seeding, and so silently produced a
+  # "benchmark-report" artifact with retrieval_metrics = {"status": "skipped
+  # -- no DB or seeding failed"} -- a real-looking but empty result.
+  # eval_on_pr.yml is the real, DB-backed benchmark/regression gate, scoped
+  # to the paths that actually affect retrieval/ranking. Removed here
+  # rather than duplicated.
