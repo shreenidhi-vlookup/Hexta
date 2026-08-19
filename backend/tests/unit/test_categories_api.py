@@ -63,8 +63,8 @@ class TestMyDocumentsScope:
     keeping the full list admin-only."""
 
     def test_query_filters_on_the_calling_user(self):
-        from unittest.mock import MagicMock
         import asyncio
+        from unittest.mock import MagicMock
 
         from app.api.v1.documents import list_my_documents
 

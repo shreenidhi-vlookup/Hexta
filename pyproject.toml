@@ -1,0 +1,39 @@
+[tool.ruff]
+# First-party Python code only. Excludes generated/vendored/build
+# artifacts and anything not actually authored here.
+include = ["backend/app/**/*.py", "backend/tests/**/*.py", "evaluation/**/*.py"]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Deliberately narrow on first landing, chosen by actually running ruff
+# against this codebase and reviewing every finding rather than enabling
+# a rule family and hoping -- not "ruff defaults", a specific set that
+# was manually confirmed both safe to auto-fix and free of false
+# positives here:
+#   F541 (f-string with no placeholders), F601 (duplicate dict key),
+#   F841 (unused local variable), I001 (unsorted imports).
+# Excluded, each for a concrete reason found while reviewing the full
+# 195-violation baseline, not by rule-family guess:
+#   F401 (unused import) -- app/api/v1/search.py deliberately re-exports
+#     several names under this module's own underscore aliases so
+#     tests/unit/test_search_dampening.py can still import them (see that
+#     import block's own comment); a blind autofix or blocking CI rule
+#     here would break real, passing tests. Needs a file-by-file review
+#     to separate genuine dead imports from intentional re-exports --
+#     out of scope for this pass, left as a known follow-up.
+#   E501 (line too long) -- 114 of the 195 total violations, an
+#     established codebase-wide habit of long, deliberately detailed
+#     inline comments/docstrings (see CLAUDE.md's own emphasis on
+#     recording evidence in comments). Reformatting all of them is an
+#     unrelated, large, purely-cosmetic change, not a lint-tooling change.
+#   E402 (import not at top of file) -- every occurrence found is a
+#     deliberate sys.path adjustment before an import (scripts run
+#     standalone outside the package), not an accidental ordering slip.
+#   E741 (ambiguous variable name, e.g. single-letter `l`) -- style
+#     preference already pervasive in this codebase; not a correctness
+#     signal worth blocking CI over on first landing.
+select = ["F541", "F601", "F841", "I001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]

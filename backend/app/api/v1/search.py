@@ -31,8 +31,14 @@ from app.config import settings
 from app.db.postgres.session import acquire
 from app.dependencies import require_auth
 from app.knowledge_gap.gap_detector import detect_and_log
-from app.query_processing import alias_resolver, corpus_vocab, domain_terms
-from app.query_processing import comparison, coreference, scope_guard
+from app.query_processing import (
+    alias_resolver,
+    comparison,
+    coreference,
+    corpus_vocab,
+    domain_terms,
+    scope_guard,
+)
 from app.query_processing.pipeline import process_query
 from app.ranking.reranker import rerank
 from app.ranking.rrf import rank_fusion
@@ -201,7 +207,7 @@ def _dampen_generic_confidence(
 # import (search.py already imports build_response_package from
 # package_builder.py). Re-exported here under the original underscore
 # names so existing callers/tests (test_search_dampening.py) are unaffected.
-from app.query_processing.relevance import (  # noqa: E402
+from app.query_processing.relevance import (  # noqa: E402, I001
     _RELEVANCE_STOP,
     query_content_terms as _query_content_terms,
     relevance_factor as _relevance_factor,

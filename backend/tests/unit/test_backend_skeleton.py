@@ -60,6 +60,7 @@ class TestAuthEndpoints:
 
     def test_login_invalid_credentials(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -71,6 +72,7 @@ class TestAuthEndpoints:
 
     def test_login_empty_credentials(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -82,6 +84,7 @@ class TestAuthEndpoints:
 
     def test_verify_invalid_token(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -190,6 +193,7 @@ class TestEndpoints:
 
     def test_search_endpoint_returns_response(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -203,6 +207,7 @@ class TestEndpoints:
 
     def test_documents_upload_requires_file(self):
         from fastapi.testclient import TestClient
+
         from app.auth.jwt_handler import create_token
         from app.main import app
 
@@ -222,6 +227,7 @@ class TestEndpoints:
 
     def test_admin_users_endpoint_requires_auth(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -230,6 +236,7 @@ class TestEndpoints:
 
     def test_analytics_endpoint_requires_auth(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -238,6 +245,7 @@ class TestEndpoints:
 
     def test_documents_list_endpoint_requires_auth(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -246,6 +254,7 @@ class TestEndpoints:
 
     def test_feedback_endpoint_exists(self):
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)

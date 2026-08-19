@@ -10,7 +10,6 @@ Idle-stops after 10 minutes of no activity (hexa-backend-idle.timer).
 from __future__ import annotations
 
 import time
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

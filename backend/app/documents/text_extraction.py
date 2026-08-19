@@ -252,7 +252,6 @@ def _extract_rtf(path: Path) -> ExtractedText:
 
 def _extract_epub(path: Path) -> ExtractedText:
     import zipfile
-
     from html.parser import HTMLParser
 
     class TextExtractor(HTMLParser):

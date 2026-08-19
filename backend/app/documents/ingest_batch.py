@@ -24,16 +24,16 @@ from pathlib import Path
 from app.config import settings
 from app.db.postgres.schema import ensure_schema
 from app.db.postgres.session import acquire
+from app.documents import upload_metadata
 from app.documents.abbreviations import harvest_abbreviations
 from app.documents.chunking.structural_chunker import StructuralChunker
 from app.documents.embedding import generate_embeddings
 from app.documents.entity_extraction import extract_entities
 from app.documents.indexing import index_document
 from app.documents.metadata_extraction import extract_metadata
-from app.documents.summarization import summarize_chunk
-from app.documents import upload_metadata
 from app.documents.ocr_cleanup import clean_ocr_pages
-from app.documents.text_extraction import extract_text, ExtractedText
+from app.documents.summarization import summarize_chunk
+from app.documents.text_extraction import ExtractedText, extract_text
 
 logging.basicConfig(level=settings.log_level, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)

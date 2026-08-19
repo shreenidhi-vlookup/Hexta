@@ -20,7 +20,7 @@ CONTRACTIONS: dict[str, str] = {
     "hows": "how is", "how's": "how is", "whys": "why is", "why's": "why is",
     "whens": "when is", "when's": "when is", "wheres": "where is", "where's": "where is",
     "its": "it is", "it's": "it is", "thats": "that is", "that's": "that is",
-    "theres": "there is", "there's": "there is", "theres": "there is",
+    "theres": "there is", "there's": "there is",
     "dont": "do not", "don't": "do not", "doesnt": "does not", "doesn't": "does not",
     "cant": "cannot", "can't": "cannot", "couldnt": "could not", "couldn't": "could not",
     "wouldnt": "would not", "wouldn't": "would not", "shouldnt": "should not", "shouldn't": "should not",
@@ -32,7 +32,7 @@ CONTRACTIONS: dict[str, str] = {
     "we're": "we are", "theyre": "they are", "they're": "they are",
     "lets": "let us", "let's": "let us", "gonna": "going to", "wanna": "want to",
     "gotta": "got to", "kinda": "kind of", "lemme": "let me", "gimme": "give me",
-    "whatis": "what is", "whats": "what is",
+    "whatis": "what is",
 }
 
 # Applied to sub-query text for search (after splitting). Keeps letters,
