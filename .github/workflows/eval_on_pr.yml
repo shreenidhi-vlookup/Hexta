@@ -69,6 +69,11 @@ jobs:
       - name: Install pgvector and set up schema
         env:
           HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
+          # config.Settings fails fast without a JWT secret (empty HS256
+          # key would let anyone forge admin tokens), so every step that
+          # imports app.config must carry one -- even non-auth steps like
+          # schema creation.
+          HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
         run: |
           PGPASSWORD=adminpass psql -h localhost -U admin -d hexa_assistant -c "CREATE EXTENSION IF NOT EXISTS vector;"
           cd backend
@@ -77,6 +82,7 @@ jobs:
       - name: Seed benchmark data
         env:
           HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
+          HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
           PYTHONPATH: ${{ github.workspace }}
         run: |
           cd backend
