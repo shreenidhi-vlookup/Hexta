@@ -17,6 +17,7 @@ Every response field traces back verbatim to a source chunk.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import time
 import uuid
@@ -42,7 +43,7 @@ from app.query_processing.pipeline import process_query
 from app.query_processing.query_expansion import generate_query_variants
 from app.ranking.reranker import rerank
 from app.ranking.rrf import rank_fusion
-from app.response import answerability
+from app.response import answerability, grounding, llm_synthesis, response_cache
 from app.response.confidence_thresholds import route_by_confidence
 from app.response.followup_questions import has_domain_topic, suggest_followups
 from app.response.package_builder import build_response_package
@@ -50,6 +51,7 @@ from app.response.validation import validate_package
 from app.search.hybrid_orchestrator import search_knowledge_base
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class HistoryTurn(BaseModel):
@@ -65,7 +67,12 @@ class SearchRequest(BaseModel):
 
 
 class AnswerBlock(BaseModel):
-    """A single answer for a single sub-question."""
+    """A single answer for a single sub-question.
+
+    ``synthesized``/``llm_model`` are provenance (LLM_INTEGRATION_PLAN.md
+    Stage 1): True only when the answer phrase was LLM-synthesized AND
+    passed the grounding validator. Extractive answers carry False/None.
+    """
 
     question: str
     title: str
@@ -73,6 +80,8 @@ class AnswerBlock(BaseModel):
     excerpts: list[dict]
     confidence: float
     routing: str
+    synthesized: bool = False
+    llm_model: str | None = None
 
 
 class SearchResponse(BaseModel):
@@ -459,6 +468,31 @@ def _run_attempt(
         answer_rerank_score,
     )
 
+    # Phase C (LLM_INTEGRATION_PLAN.md Stage 1): optional synthesis tier.
+    # OFF unless settings.llm_enabled. The synthesized text must pass the
+    # grounding validator against the same evidence the user can see, or
+    # the extractive answer_phrase stands. Any failure — disabled, no key,
+    # timeout, HTTP error, grounding fail — degrades to the extractive
+    # answer; this tier can only improve fluency, never fabricate.
+    llm_model_used: str | None = None
+    if (
+        settings.llm_enabled
+        and package.routing != "no_answer"
+        and package.excerpts
+    ):
+        evidence_texts = [e.text for e in package.excerpts[:5]]
+        result = llm_synthesis.synthesize(question, evidence_texts)
+        if result is not None:
+            verdict = grounding.check_grounding(result.text, evidence_texts)
+            if verdict.passed:
+                package.answer_phrase = result.text
+                llm_model_used = result.model
+            else:
+                logger.info(
+                    "Grounding rejected LLM answer (%d unsupported sentences)",
+                    len(verdict.failed_sentences),
+                )
+
     valid, reason = validate_package(package, user)
     if not valid:
         raise HTTPException(
@@ -484,6 +518,8 @@ def _run_attempt(
         ],
         confidence=package.confidence,
         routing=package.routing,
+        synthesized=llm_model_used is not None,
+        llm_model=llm_model_used,
     )
     return block, [c.chunk_id for c in ranked[:25]], (
         rerank_scores.get(ranked[0].chunk_id) if ranked else None
@@ -516,6 +552,13 @@ async def search(
     history = [h.model_dump() for h in request.history] if request.history else []
     raw = coreference.resolve_references(request.query, history)
 
+    # Stage 0 response cache (LLM_INTEGRATION_PLAN.md): exact-query,
+    # RBAC-scoped, version-stamped. A hit skips the whole pipeline but is
+    # still audit-logged (rule 8) with outcome "cache_hit".
+    query_hash, scope_hash = response_cache.compute_keys(
+        request.query, history, user
+    )
+
     # Refresh the corpus-derived vocabulary before query processing so
     # spell correction can recognise terms that exist only in the user's
     # own documents (see corpus_vocab). TTL-cached, so this is a no-op on
@@ -523,6 +566,24 @@ async def search(
     # I/O-free.
     with acquire() as conn:
         corpus_vocab.refresh_if_stale(conn)
+
+        if settings.response_cache_enabled:
+            cached = response_cache.get_cached(conn, query_hash, scope_hash)
+            if cached is not None:
+                latency_ms = time.time() * 1000 - start_ms
+                log_query(AuditLogEntry(
+                    user_id=user["id"],
+                    query=request.query,
+                    sub_queries=[],
+                    retrieved_ids=[],
+                    confidence=cached.get("confidence"),
+                    outcome=f"cache_hit:{cached.get('routing')}",
+                    latency_ms=round(latency_ms, 1),
+                    llm_model=cached.get("primary_llm_model"),
+                ))
+                cached.pop("primary_llm_model", None)
+                cached["response_id"] = ""  # fresh id per replay
+                return SearchResponse(**cached)
 
     plan = process_query(raw)
 
@@ -569,6 +630,9 @@ async def search(
 
     blocks: list[AnswerBlock] = []
     retrieved_ids: list[int] = []
+    response_id = hashlib.sha256(
+        f"{raw}:{uuid.uuid4()}".encode()
+    ).hexdigest()[:16]
 
     with acquire() as conn:
         for question, search_text in work:
@@ -584,6 +648,33 @@ async def search(
         # Topic-appropriate follow-up suggestions (verified against the KB).
         related_questions = suggest_followups(conn, [sq.text for sq in plan.sub_queries])
 
+        # Stage 0 cache write — validated responses only get here (the
+        # pipeline above has run all gates). Best-effort; never raises.
+        if settings.response_cache_enabled:
+            primary_for_cache = _pick_primary(blocks)
+            response_cache.store(
+                conn,
+                query_hash,
+                scope_hash,
+                request.query,
+                {
+                    "answers": [b.model_dump() for b in blocks],
+                    "title": primary_for_cache.title if primary_for_cache else "",
+                    "answer_phrase": primary_for_cache.answer_phrase if primary_for_cache else "",
+                    "excerpts": primary_for_cache.excerpts if primary_for_cache else [],
+                    "confidence": primary_for_cache.confidence if primary_for_cache else 0.0,
+                    "routing": primary_for_cache.routing if primary_for_cache else "no_answer",
+                    "related_questions": related_questions,
+                    "answered": sum(1 for b in blocks if b.routing in ("answer", "partial")),
+                    "total": len(blocks),
+                    "comparison": is_comparison,
+                    "primary_llm_model": (
+                        primary_for_cache.llm_model if primary_for_cache else None
+                    ),
+                },
+                retrieved_ids,
+            )
+
     primary = _pick_primary(blocks)
     primary = primary or AnswerBlock(
         question="", title="No Results Found", answer_phrase="",
@@ -592,9 +683,6 @@ async def search(
 
     answered = sum(1 for b in blocks if b.routing in ("answer", "partial"))
     total = len(blocks)
-    response_id = hashlib.sha256(
-        f"{raw}:{primary.confidence}:{uuid.uuid4()}".encode()
-    ).hexdigest()[:16]
 
     # Knowledge gap detection (best-effort — never raises).
     for block in blocks:
@@ -616,6 +704,7 @@ async def search(
         response_id=response_id,
         outcome=primary.routing,
         latency_ms=round(latency_ms, 1),
+        llm_model=primary.llm_model,
     ))
 
     return SearchResponse(

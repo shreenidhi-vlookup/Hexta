@@ -136,6 +136,24 @@ DDL_STATEMENTS: list[str] = [
         entity_type TEXT NOT NULL DEFAULT 'term'
     )
     """,
+    # --- Response cache (LLM_INTEGRATION_PLAN.md Stage 0) ---
+    # Postgres-native exact-query cache — Redis stays banned (rule 2).
+    # Entries are version-stamped: a hit is valid only while every
+    # contributing document's version is unchanged, so re-ingestion or an
+    # approval flip self-invalidates without a sweep. scope_hash bakes the
+    # RBAC scope (role + departments + client) into the key so two users
+    # share an entry only when they see the same corpus.
+    """
+    CREATE TABLE IF NOT EXISTS response_cache (
+        id           BIGSERIAL PRIMARY KEY,
+        query_hash   TEXT NOT NULL UNIQUE,
+        scope_hash   TEXT NOT NULL,
+        query_text   TEXT NOT NULL,
+        response     JSONB NOT NULL,
+        doc_versions JSONB NOT NULL DEFAULT '{}',
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
 ]
 
 INDEX_STATEMENTS: list[str] = [
@@ -207,6 +225,10 @@ ALTER_STATEMENTS: list[str] = [
     END
     $emb$;
     """,
+    # LLM synthesis provenance (LLM_INTEGRATION_PLAN.md Stage 1): which
+    # model (if any) synthesized the answer phrase. Nullable — extractive
+    # answers leave it NULL. Idempotent via IF NOT EXISTS.
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS llm_model TEXT",
 ]
 
 # Index for client-scored retrieval (Phase 3a).

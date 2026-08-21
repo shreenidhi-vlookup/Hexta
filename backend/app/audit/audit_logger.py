@@ -32,6 +32,7 @@ class AuditLogEntry:
         response_id: str | None = None,
         outcome: str | None = None,
         latency_ms: float | None = None,
+        llm_model: str | None = None,
     ) -> None:
         self.user_id = user_id
         self.query = query
@@ -41,6 +42,10 @@ class AuditLogEntry:
         self.response_id = response_id or str(uuid.uuid4())
         self.outcome = outcome
         self.latency_ms = latency_ms
+        # Provenance (LLM_INTEGRATION_PLAN.md Stage 1): which model
+        # synthesized the answer phrase, when one did. NULL for the
+        # extractive path.
+        self.llm_model = llm_model
 
 
 def log_query(entry: AuditLogEntry) -> None:
@@ -58,8 +63,8 @@ def log_query(entry: AuditLogEntry) -> None:
                 cur.execute(
                     "INSERT INTO audit_log "
                     "(user_id, query, sub_queries, retrieved_ids, confidence, "
-                    " response_id, outcome, latency_ms) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    " response_id, outcome, latency_ms, llm_model) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (
                         entry.user_id,
                         entry.query,
@@ -69,6 +74,7 @@ def log_query(entry: AuditLogEntry) -> None:
                         entry.response_id,
                         entry.outcome,
                         entry.latency_ms,
+                        entry.llm_model,
                     ),
                 )
                 conn.commit()

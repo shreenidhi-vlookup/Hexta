@@ -54,6 +54,21 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-ai/nomic-embed-text-v1.5-Q"
     embedding_cache_dir: str = "nlp_models/embeddings"
 
+    # --- LLM synthesis tier (docs/LLM_INTEGRATION_PLAN.md Stage 1) ---
+    # OFF by default: the extractive pipeline is the product. When enabled,
+    # top evidence is sent to Claude to synthesize a cited answer, which
+    # must pass the grounding validator (response/grounding.py) or the
+    # extractive answer_phrase is used instead. The key is injected via
+    # env (HEXA_ANTHROPIC_API_KEY maps here) — never committed.
+    llm_enabled: bool = False
+    llm_api_key: str = ""
+    llm_model: str = "claude-haiku-4-5"
+    llm_timeout_ms: int = 4000
+    llm_max_tokens: int = 600
+
+    # --- Response cache (Stage 0, Postgres-native — no Redis) ---
+    response_cache_enabled: bool = True
+
     # --- Storage ---
     storage_pending_dir: str = "storage/pending"
     storage_processed_dir: str = "storage/processed"
