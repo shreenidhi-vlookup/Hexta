@@ -71,8 +71,6 @@ def search_knowledge_base(
     if not sub_queries:
         return SearchResult()
 
-    primary_query = sub_queries[0]
-
     combined_text = " ".join(sub_queries)
     tsquery = build_tsquery(combined_text)
 
