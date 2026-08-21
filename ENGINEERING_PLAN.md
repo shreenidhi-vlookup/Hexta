@@ -98,4 +98,4 @@ with before/after `evaluation/run_benchmark.py` numbers recorded in
 
 ---
 
-**Status:** Phases 1-3 **COMPLETE**. Phase 4 items are the production hardening backlog. Phase 5: GraphRAG-lite, Multi-Query, and the Self-RAG subset **implemented** (pending re-ingestion + benchmark calibration of `entity_weight` and reranker p95 re-check); Step-Back/Docling deferred with triggers; HyDE rejected and ColPali deferred per ADRs in `docs/adr/`.
+**Status:** Phases 1-3 **COMPLETE**. Phase 4 items are the production hardening backlog. Phase 5: GraphRAG-lite, Multi-Query, and the Self-RAG subset **implemented** (pending re-ingestion + benchmark calibration of `entity_weight` and reranker p95 re-check); Step-Back/Docling deferred with triggers; HyDE rejected and ColPali deferred per ADRs in `docs/adr/`. **Phase 6 (contingency):** if retrieval quality plateaus but users still reject answers for phrasing/synthesis reasons, an LLM synthesis tier (Claude Haiku/Sonnet behind a grounding validator + extractive fallback) plus a Postgres-native response cache is pre-planned in `docs/LLM_INTEGRATION_PLAN.md` — build only on its trigger conditions.
