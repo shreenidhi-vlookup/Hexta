@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Protocol
 
 from psycopg.types.json import Json
 
@@ -75,23 +74,3 @@ def log_query(entry: AuditLogEntry) -> None:
                 conn.commit()
     except Exception as exc:
         logger.error("Audit log write failed: %s", exc)
-
-
-class AuditLogger(Protocol):
-    """Protocol for audit logging — allows dependency injection in tests."""
-
-    def log(self, entry: AuditLogEntry) -> None: ...
-
-
-class PostgresAuditLogger:
-    """Production audit logger — writes to Postgres."""
-
-    def log(self, entry: AuditLogEntry) -> None:
-        log_query(entry)
-
-
-class NullAuditLogger:
-    """No-op audit logger for testing."""
-
-    def log(self, entry: AuditLogEntry) -> None:
-        logger.debug("Audit (null): %s", entry.query)

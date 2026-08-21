@@ -25,7 +25,6 @@ from app.response.package_builder import ResponsePackage
 def validate_package(
     package: ResponsePackage,
     user: dict | None,
-    min_confidence: float = 50.0,
     ) -> tuple[bool, str]:
     """Validate a response package against RBAC and version rules.
 

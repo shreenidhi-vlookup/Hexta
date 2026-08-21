@@ -196,7 +196,7 @@ flowchart TD
     CHK --> META
     PARA --> META
     META --> ENT[Dictionary entity extraction]
-    ENT --> EMB[Embedding Generation<br/>bge-small-en-v1.5]
+    ENT --> EMB[Embedding Generation<br/>nomic-embed-text-v1.5-Q]
     EMB --> IDX[Write rows + pgvector column<br/>to shared Postgres]
     IDX --> DONE[Process exits —<br/>embedding RAM released]
 ```

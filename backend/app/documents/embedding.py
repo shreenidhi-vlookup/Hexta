@@ -1,7 +1,13 @@
 """Embedding generation for document ingestion.
 
-Uses FastEmbed (bge-small-en-v1.5 ONNX Int8, ~66MB) to generate
-384-dimensional embeddings. Loaded lazily at first use and cached.
+Uses FastEmbed (nomic-embed-text-v1.5-Q ONNX Int8, ~137MB) to generate
+768-dimensional embeddings. Loaded lazily at first use and cached.
+
+Nomic models are instruction-aware: inputs MUST carry the
+``search_document:`` prefix here and ``search_query:`` in
+``search/pgvector_search.py`` or retrieval quality degrades sharply.
+Changing the embedding model invalidates every stored vector — bump the
+dimension in ``db/postgres/schema.py`` and re-ingest the whole corpus.
 
 Per CLAUDE.md rule 5: this module runs ONLY in the batch ingestion
 process — never imported by app.main.py or any request handler.
@@ -45,6 +51,7 @@ def generate_embeddings(texts: Sequence[str]) -> list[list[float]]:
         raise RuntimeError("fastembed is not installed")
 
     model = _get_model()
-    embeddings = list(model.embed(texts, batch_size=16))
+    prefixed = [f"search_document: {t}" for t in texts]
+    embeddings = list(model.embed(prefixed, batch_size=16))
     logger.info("Generated %d embeddings", len(embeddings))
     return embeddings

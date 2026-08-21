@@ -86,7 +86,3 @@ def process_query(raw: str) -> QueryPlan:
         subs, truncated = multi_question.plan_split(normalized)
     structured = [_build_sub_query(s) for s in subs]
     return QueryPlan(raw=raw, normalized=normalized, sub_queries=structured, truncated=truncated)
-
-
-def has_searchable_content(plan: QueryPlan) -> bool:
-    return any(sq.text for sq in plan.sub_queries)

@@ -3,6 +3,56 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
+const REQUEST_TIMEOUT_MS = 20000;
+
+interface RequestOptions extends RequestInit {
+  token?: string;
+}
+
+/** Read an error body that may not be JSON (proxy HTML 502/504, etc.). */
+async function errorDetail(response: Response, fallback: string): Promise<string> {
+  try {
+    const text = await response.text();
+    if (!text) return fallback;
+    try {
+      const parsed = JSON.parse(text);
+      return parsed?.detail || fallback;
+    } catch {
+      return text.length > 200 ? fallback : text;
+    }
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * fetch with a timeout + abort. A hung backend must not leave the chat
+ * spinner or admin panel loading forever.
+ */
+async function fetchWithTimeout(path: string, options: RequestOptions = {}): Promise<Response> {
+  const { token, ...init } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Standard error body extraction for calls routed through fetchWithTimeout. */
+async function throwApiError(response: Response, fallback: string): Promise<never> {
+  throw new Error(await errorDetail(response, fallback));
+}
+
 export interface HistoryTurn {
   question: string;
   answer?: string;
@@ -62,24 +112,16 @@ export async function searchKnowledgeBase(
   token?: string,
   history?: HistoryTurn[]
 ): Promise<SearchResponse> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
   const body: SearchRequest = history && history.length > 0 ? { query, history } : { query };
 
-  const response = await fetch(`${API_BASE_URL}/search/`, {
+  const response = await fetchWithTimeout(`/search/`, {
     method: 'POST',
-    headers,
+    token,
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Search request failed');
+    await throwApiError(response, 'Search request failed');
   }
 
   return response.json();
@@ -89,15 +131,13 @@ export async function login(
   email: string,
   password: string
 ): Promise<AuthLoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/auth/login`, {
+  const response = await fetchWithTimeout(`/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Login failed');
+    await throwApiError(response, 'Login failed');
   }
 
   return response.json();
@@ -106,9 +146,9 @@ export async function login(
 export async function verifyToken(
   token: string
 ): Promise<{ valid: boolean; user_id?: number; email?: string }> {
-  const response = await fetch(`${API_BASE_URL}/auth/verify`, {
+  const response = await fetchWithTimeout(`/auth/verify`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    token,
   });
 
   if (!response.ok) {
@@ -131,21 +171,13 @@ export interface UserSettings {
 export async function getUserSettings(
   token?: string
 ): Promise<UserSettings> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${API_BASE_URL}/settings/`, {
+  const response = await fetchWithTimeout(`/settings/`, {
     method: 'GET',
-    headers,
+    token,
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to fetch settings');
+    await throwApiError(response, 'Failed to fetch settings');
   }
 
   return response.json();
@@ -155,22 +187,14 @@ export async function updateUserSettings(
   settings: UserSettings,
   token?: string
 ): Promise<UserSettings> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${API_BASE_URL}/settings/`, {
+  const response = await fetchWithTimeout(`/settings/`, {
     method: 'PUT',
-    headers,
+    token,
     body: JSON.stringify(settings),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to update settings');
+    await throwApiError(response, 'Failed to update settings');
   }
 
   return response.json();
@@ -180,22 +204,14 @@ export async function submitFeedback(
   request: FeedbackRequest,
   token?: string
 ): Promise<{ message: string; feedback_id: number }> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${API_BASE_URL}/feedback/`, {
+  const response = await fetchWithTimeout(`/feedback/`, {
     method: 'POST',
-    headers,
+    token,
     body: JSON.stringify(request),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Feedback submission failed');
+    await throwApiError(response, 'Feedback submission failed');
   }
 
   return response.json();
@@ -298,14 +314,13 @@ export interface AdminStats {
 }
 
 async function adminFetch<T>(path: string, token: string, method: string = "GET"): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithTimeout(path, {
     method,
-    headers: { Authorization: `Bearer ${token}` },
+    token,
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Admin request failed');
+    await throwApiError(response, 'Admin request failed');
   }
 
   return response.json();
@@ -335,18 +350,14 @@ export async function createUser(
   req: CreateUserRequest,
   token: string
 ): Promise<{ user: AdminUser }> {
-  const response = await fetch(`${API_BASE_URL}/admin/users`, {
+  const response = await fetchWithTimeout(`/admin/users`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    token,
     body: JSON.stringify(req),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Failed to create user");
+    await throwApiError(response, "Failed to create user");
   }
 
   return response.json();
@@ -409,9 +420,7 @@ export async function acknowledgeGap(
 export async function fetchDocumentCategories(
   token: string
 ): Promise<DocumentCategories> {
-  const response = await fetch(`${API_BASE_URL}/documents/categories`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await fetchWithTimeout(`/documents/categories`, { token });
   if (!response.ok) {
     throw new Error("Could not load document categories");
   }
@@ -445,15 +454,14 @@ export async function uploadDocument(
   if (clientId) {
     form.append("client_id", clientId);
   }
-  const response = await fetch(`${API_BASE_URL}/documents/upload`, {
+  const response = await fetchWithTimeout(`/documents/upload`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    token,
     body: form,
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Upload failed");
+    await throwApiError(response, "Upload failed");
   }
 
   return response.json();
@@ -464,18 +472,14 @@ export async function updateUserAdmin(
   patch: Partial<AdminUser & { role?: string }>,
   token: string
 ): Promise<{ user: AdminUser }> {
-  const response = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+  const response = await fetchWithTimeout(`/admin/users/${userId}`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    token,
     body: JSON.stringify(patch),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Update failed");
+    await throwApiError(response, "Update failed");
   }
 
   return response.json();
@@ -485,14 +489,13 @@ export async function approveDocument(
   documentId: number,
   token: string
 ): Promise<{ message: string; document_id: number; title: string; chunks_updated: number }> {
-  const response = await fetch(`${API_BASE_URL}/documents/${documentId}/approve`, {
+  const response = await fetchWithTimeout(`/documents/${documentId}/approve`, {
     method: "PATCH",
-    headers: { Authorization: `Bearer ${token}` },
+    token,
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Approval failed");
+    await throwApiError(response, "Approval failed");
   }
 
   return response.json();

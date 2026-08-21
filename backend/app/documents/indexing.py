@@ -15,8 +15,24 @@ from psycopg import Connection
 
 from app.db.postgres.models import content_hash
 from app.documents.chunking.structural_chunker import Chunk
+from app.documents.entity_extraction import IngestionEntities, extract_entities
 
 logger = logging.getLogger(__name__)
+
+
+def _entity_pairs(entities: IngestionEntities) -> list[tuple[str, str]]:
+    """Flatten IngestionEntities into (canonical, entity_type) pairs."""
+    pairs: list[tuple[str, str]] = []
+    for group, entity_type in (
+        (entities.lenders, "lender"),
+        (entities.products, "product"),
+        (entities.documents, "document"),
+        (entities.property_types, "property"),
+        (entities.acronyms, "acronym"),
+    ):
+        for canonical in group:
+            pairs.append((canonical, entity_type))
+    return pairs
 
 
 @dataclass
@@ -45,7 +61,10 @@ def index_document(
     New uploads default to is_approved=false (D1); admin must approve
     before they become searchable.
     """
-    assert len(chunks) == (len(embeddings) if embeddings else 0) or not embeddings
+    if embeddings is not None:
+        assert len(chunks) == len(embeddings), (
+            f"chunks ({len(chunks)}) and embeddings ({len(embeddings)}) length mismatch"
+        )
 
     with conn.cursor() as cur:
         cur.execute(
@@ -86,6 +105,7 @@ def index_document(
                      client_id, property_id, case_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, false, %s, %s, %s)
                 ON CONFLICT (content_hash) DO NOTHING
+                RETURNING id
                 """,
                 (
                     document_id,
@@ -101,8 +121,21 @@ def index_document(
                     case_id,
                 ),
             )
-            if cur.rowcount > 0:
+            row = cur.fetchone()
+            if row is not None:
                 indexed += 1
+                # GraphRAG-lite: harvest chunk→entity edges for the
+                # query-time entity channel (batch-time work per rule 5).
+                links = _entity_pairs(extract_entities(chunk.content))
+                if links:
+                    cur.executemany(
+                        """
+                        INSERT INTO chunk_entity_links (chunk_id, entity, entity_type)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (chunk_id, entity, entity_type) DO NOTHING
+                        """,
+                        [(row["id"], entity, entity_type) for entity, entity_type in links],
+                    )
             else:
                 skipped += 1
 

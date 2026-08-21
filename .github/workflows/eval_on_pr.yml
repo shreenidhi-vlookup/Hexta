@@ -90,7 +90,7 @@ jobs:
       - name: Run benchmark
         env:
           HEXA_DATABASE_URL: postgresql://admin:adminpass@127.0.0.1:5432/hexa_assistant
-          HEXA_JWT_SECRET: test-secret
+          HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
           PYTHONPATH: ${{ github.workspace }}/backend
         run: |
           python -m evaluation.run_benchmark --output-dir evaluation/reports

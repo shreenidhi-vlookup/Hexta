@@ -50,7 +50,7 @@ phase only touches `infra/shared/`.
    this project's own database (created via
     `infra/shared/postgres/init/01_hexa_assistant.sql`).
 3. Set up Alembic; first migration creates the `document_chunks` table
-   with a `vector(384)` column (dimension matches bge-small-en-v1.5).
+   with a `vector(768)` column (dimension matches nomic-embed-text-v1.5-Q).
 4. Add `auth/jwt_handler.py` and a minimal `/api/v1/auth/login` endpoint
    backed by a `users` table (email, hashed password, role).
 5. Write `Dockerfile` using `python:3.11-slim`.

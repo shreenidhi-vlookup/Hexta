@@ -1,7 +1,6 @@
 """FastAPI dependency injection.
 
 Provides:
-- ``get_db`` — yields a pooled Postgres connection per request
 - ``get_current_user`` — extracts and verifies JWT, returns the user row
 - ``require_department_access`` — RBAC scope resolver from the JWT
 
@@ -19,16 +18,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.jwt_handler import verify_token
-from app.config import settings
 from app.db.postgres.session import acquire
 
 bearer_scheme = HTTPBearer(auto_error=False)
-
-
-def get_db() -> psycopg.Connection:
-    """Yield a pooled Postgres connection for a single request."""
-    with acquire() as conn:
-        yield conn
 
 
 async def get_current_user(

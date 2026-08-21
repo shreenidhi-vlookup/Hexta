@@ -1,6 +1,7 @@
 """Seed the database with an admin user and test documents."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -9,11 +10,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from passlib.hash import bcrypt
 from app.db.postgres.session import acquire
 
-ADMIN_PASSWORD_HASH = "$2b$12$B5z08U8N66Hn2E/s6RIuZuti.MxB5wpWjWNySk2h6qXooQSAUOnHK"
-STAFF_PASSWORD_HASH = "$2b$12$.jBHztpNLpWda9BEsVsHbuqewwQrUNZSTN8uKfVMCMuFWYVe34RZq"  # Staff@123
+# Passwords are supplied via env vars so the seeded accounts never carry
+# a well-known, committed credential. Without a var, we fall back to the
+# documented dev-only defaults and print a loud warning so a seed run is
+# never silently producing an account with a guessable password.
+DEV_DEFAULT_ADMIN_PASSWORD = "HexaAdmin@123"
+DEV_DEFAULT_STAFF_PASSWORD = "Staff@123"
+
+
+def _load_password(var: str, default: str, label: str) -> str:
+    password = os.environ.get(var, default)
+    if not os.environ.get(var):
+        print(
+            f"WARNING: {var} not set — using the documented dev-only default "
+            f"password for {label}. Set {var} to seed a real credential."
+        )
+    return password
 
 
 def seed() -> None:
+    admin_password = _load_password("HEXA_ADMIN_PASSWORD", DEV_DEFAULT_ADMIN_PASSWORD, "admin@hexa.local")
+    staff_password = _load_password("HEXA_STAFF_PASSWORD", DEV_DEFAULT_STAFF_PASSWORD, "staff@hexa.local")
+
     with acquire() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -29,7 +47,7 @@ def seed() -> None:
                     "VALUES (%s, %s, %s, %s, %s, %s)",
                     (
                         "admin@hexa.local",
-                        ADMIN_PASSWORD_HASH,
+                        bcrypt.hash(admin_password),
                         "Admin User",
                         "super_admin",
                         "general",
@@ -50,9 +68,9 @@ def seed() -> None:
                     "VALUES (%s, %s, %s, %s, %s, %s)",
                     (
                         "staff@hexa.local",
-                        STAFF_PASSWORD_HASH,
+                        bcrypt.hash(staff_password),
                         "Staff User",
-                        "loan_officer",
+                        "processor",
                         "general",
                         ["general"],
                     ),

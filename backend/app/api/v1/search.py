@@ -26,7 +26,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.audit.audit_logger import AuditLogEntry, log_query
-from app.auth.rbac import resolve_user_departments
 from app.config import settings
 from app.db.postgres.session import acquire
 from app.dependencies import require_auth
@@ -40,6 +39,7 @@ from app.query_processing import (
     scope_guard,
 )
 from app.query_processing.pipeline import process_query
+from app.query_processing.query_expansion import generate_query_variants
 from app.ranking.reranker import rerank
 from app.ranking.rrf import rank_fusion
 from app.response import answerability
@@ -341,8 +341,43 @@ def _decide_routing(
 def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[AnswerBlock, list[int]]:
     """Build one AnswerBlock for a sub-question (search + rank + validate).
 
+    Phase 5 Self-RAG subset: when the cross-encoder affirmatively rejects
+    the evidence (answerability veto), ONE recovery pass is made with the
+    next deterministic query variant and kept only if its top rerank score
+    is both better and answerable. Hard-capped at one extra retrieval —
+    reranker cost is linear per attempt against the <200ms p95 budget
+    (CLAUDE.md rule 6), so this is bounded self-critique, not a loop.
+    With reranking disabled there is no critique signal and the retry
+    never fires (degrades to previous behaviour).
+
     Returns ``(block, retrieved_chunk_ids)``.
     """
+    block, ids, top_rerank = _run_attempt(conn, question, search_text, user)
+
+    if (
+        settings.rerank_enabled
+        and not answerability.is_answerable(top_rerank)
+    ):
+        variants = generate_query_variants(search_text)
+        if len(variants) > 1:
+            alt_block, alt_ids, alt_top = _run_attempt(
+                conn, question, variants[1], user
+            )
+            if (
+                answerability.is_answerable(alt_top)
+                and (top_rerank is None or (alt_top is not None and alt_top > top_rerank))
+            ):
+                return alt_block, alt_ids
+
+    return block, ids
+
+
+def _run_attempt(
+    conn, question: str, search_text: str, user: dict,
+) -> tuple[AnswerBlock, list[int], float | None]:
+    """One full retrieval→package→gate pass. Returns the block, retrieved
+    chunk ids, and the top candidate's rerank score (None when reranking
+    is off or the head was empty)."""
     ranked = _rank_sub_query(conn, search_text, user)
     rerank_scores: dict[int, float] = {}
 
@@ -386,11 +421,9 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
         }
         ranked.sort(key=lambda c: rerank_order.get(c.chunk_id, len(rerank_order)))
 
-    user_depts = resolve_user_departments(user)
     package = build_response_package(
         candidates=ranked,
         query_text=question,
-        user_departments=user_depts,
     )
     package.confidence = _dampen_generic_confidence(
         question,
@@ -452,7 +485,9 @@ def _build_block(conn, question: str, search_text: str, user: dict) -> tuple[Ans
         confidence=package.confidence,
         routing=package.routing,
     )
-    return block, [c.chunk_id for c in ranked[:25]]
+    return block, [c.chunk_id for c in ranked[:25]], (
+        rerank_scores.get(ranked[0].chunk_id) if ranked else None
+    )
 
 
 def _pick_primary(blocks: list[AnswerBlock]) -> AnswerBlock | None:

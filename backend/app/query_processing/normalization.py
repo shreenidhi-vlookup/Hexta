@@ -77,11 +77,3 @@ def clean_for_search(text: str) -> str:
     """
     cleaned = _STRIP_FOR_SEARCH_RE.sub(" ", text)
     return re.sub(r"\s+", " ", cleaned).strip()
-
-
-def is_empty(text: str) -> bool:
-    return not text.strip()
-
-
-def has_numeric_content(text: str) -> bool:
-    return bool(re.search(r"\d", text))

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-from app.auth.rbac import resolve_user_departments
 from app.config import settings
 from app.knowledge_gap.gap_detector import detect_and_log
 from app.query_processing.pipeline import process_query
@@ -70,7 +69,6 @@ class TestEndToEndSearchPipeline:
         plan = process_query(query)
         assert len(plan.sub_queries) >= 1
 
-        user_depts = resolve_user_departments(BENCHMARK_USER)
         from app.db.postgres.session import acquire
 
         with acquire() as conn:
@@ -99,7 +97,6 @@ class TestEndToEndSearchPipeline:
         package = build_response_package(
             candidates=ranked,
             query_text=query,
-            user_departments=user_depts,
         )
         package.routing = route_by_confidence(package.confidence)
 
@@ -147,7 +144,6 @@ class TestEndToEndSearchPipeline:
         package = build_response_package(
             candidates=ranked,
             query_text=query,
-            user_departments=resolve_user_departments(BENCHMARK_USER),
         )
         package.routing = route_by_confidence(package.confidence)
 
@@ -219,7 +215,6 @@ class TestEndToEndSearchPipeline:
         package = build_response_package(
             candidates=ranked,
             query_text=query,
-            user_departments=resolve_user_departments(BENCHMARK_USER),
         )
         package.routing = route_by_confidence(package.confidence)
 

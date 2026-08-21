@@ -16,7 +16,7 @@ This file captures everything known about the Hexta project — architecture, st
 Documents
   → Chunking (structural_chunker.py)
   → Extractive Summarization (sumy LSA, batch only)
-  → Embeddings (BAAI/bge-small-en-v1.5, ONNX quantized)
+  → Embeddings (nomic-embed-text-v1.5, ONNX quantized, 768-dim)
   → PostgreSQL + pgvector
   → Hybrid Search (BM25 + Vector, single SQL query)
   → RRF Rank Fusion
@@ -35,7 +35,7 @@ Documents
 | UI | shadcn/ui (Radix primitives), Tailwind CSS |
 | Backend | FastAPI (Python 3.11) |
 | Database | PostgreSQL + pgvector |
-| Embeddings | BAAI/bge-small-en-v1.5 (ONNX, quantized) |
+| Embeddings | nomic-ai/nomic-embed-text-v1.5-Q (ONNX Int8, 768-dim) |
 | Search | BM25 (rank_bm25) + pgvector hybrid |
 | Reranking | Optional cross-encoder (disabled by default) |
 | Summarization | sumy (LSA, batch ingestion only) |
@@ -121,6 +121,7 @@ Documents
 | `knowledge_gaps` | Low-confidence / no-answer query signals |
 | `user_settings` | Per-user UI preferences (show_related_questions) |
 | `term_aliases` | Ingestion-harvested acronyms/aliases (alias UNIQUE → canonical) for query-time expansion |
+| `chunk_entity_links` | GraphRAG-lite: chunk→canonical-entity edges (ingestion-harvested), third RRF channel at query time |
 
 ### Key Indexes
 
@@ -129,6 +130,7 @@ Documents
 - `idx_chunks_fts` — GIN index on `document_chunks.fts` (full-text search)
 - `idx_chunks_embedding` — HNSW index on `document_chunks.embedding` (vector cosine)
 - `uq_chunks_content_hash` — UNIQUE index on `document_chunks.content_hash`
+- `idx_entity_links_entity` / `idx_entity_links_chunk` — on `chunk_entity_links` (GraphRAG-lite lookups)
 
 ---
 

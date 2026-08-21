@@ -5,10 +5,10 @@
 --
 -- The application role password is read from the environment so it is
 -- never committed to the repo. It is supplied via docker-compose env
--- (POSTGRES_APP_PASSWORD) at container initialization time. The role
--- is created with the password set later by the app's own provisioning
--- step (scripts/migrate_db.sh) if this file is used as-is; see
--- backend/.env.example for the required HEXA_DB_PASSWORD.
+-- (POSTGRES_APP_PASSWORD) at container initialization time — see
+-- infra/shared/docker-compose.yml, which requires it in its .env. The
+-- backend then connects as this role using the same value (backend/.env
+-- HEXA_DATABASE_URL).
 
 CREATE DATABASE hexa_assistant;
 
@@ -16,8 +16,9 @@ CREATE DATABASE hexa_assistant;
 
 CREATE EXTENSION IF NOT EXISTS vector;   -- pgvector, replaces Qdrant
 
--- Application role is created with a placeholder and its password must
--- be set explicitly at provisioning time:
-CREATE ROLE hexa_app LOGIN;
+-- Role password comes from the container's POSTGRES_APP_PASSWORD env var
+-- (never a committed literal). \getenv is psql's env-var reader (pg15+).
+\getenv app_password POSTGRES_APP_PASSWORD
+CREATE ROLE hexa_app LOGIN PASSWORD :'app_password';
 GRANT ALL PRIVILEGES ON DATABASE hexa_assistant TO hexa_app;
 GRANT ALL PRIVILEGES ON SCHEMA public TO hexa_app;

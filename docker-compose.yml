@@ -65,7 +65,15 @@ services:
           # isn't necessarily running when ingestion fires), which is why
           # this is a dev-compose-only change, not a change to CLAUDE.md's
           # documented production budget.
-          memory: 512m
+          #
+          # Raised again 512m → 1g for the nomic-embed-text-v1.5-Q swap:
+          # measured peak RSS of loading + running the model is ~275MB
+          # (vs ~80MB for bge-small), and a scanned-PDF batch run retains
+          # OCR/page-raster memory on top, so ingestion alongside even an
+          # idle uvicorn (~50MB) exceeded 512m and was OOM-killed at model
+          # load. Production budgets MUST be re-derived before deploying
+          # nomic — see the flag in ENGINEERING_PLAN.md Phase 4.
+          memory: 1g
     command: >
       uvicorn app.main:app
       --workers 1

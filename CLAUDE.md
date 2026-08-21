@@ -72,10 +72,26 @@ Companion docs (read these for full detail, this file is the summary):
 9. **Container base images: `python:3.11-slim` for anything touching
     onnxruntime. Never `python:3.11-alpine`** for those — musl
    libc breaks compiled ML dependencies. `nginx:alpine` is fine (no ML deps).
-10. **Memory is capped per-service** (Postgres ~200MB, Nginx ~30MB, backend
-    ~200MB — see `infra/shared/docker-compose.yml` and the systemd units).
-    Don't remove these caps to "fix" an OOM — investigate why the service
-    needs more memory first.
+10. **Memory is capped per-service** (Postgres ~200MB, Nginx ~30MB,
+    backend API 400M via `MemoryMax` in
+    `infra/systemd/hexa-backend.service`, batch ingestion ~600MB
+    transient — see `infra/scripts/run_ingestion.sh` and the dev
+    compose's 1g backend cap). Don't remove these caps to "fix" an OOM —
+    investigate why the service needs more memory first. NOTE: the
+    nomic-embed-text-v1.5-Q swap (rule 11) raised the backend budget
+    from the original ~200M — measured peak RSS of loading + running
+    the model is ~275MB on its own, so the old figure would OOM-kill
+    the service on the first vector search.
+11. **The embedding model is `nomic-ai/nomic-embed-text-v1.5-Q` (768-dim,
+    FastEmbed ONNX Int8).** Nomic inputs are instruction-aware: document chunks are
+    embedded with a `search_document:` prefix (`documents/embedding.py`)
+    and queries with `search_query:` prefix
+    (`search/pgvector_search.py`) — never remove them. The pgvector column
+    is `vector(768)`; changing the embedding model invalidates every stored
+    vector and requires a schema migration plus full corpus re-ingestion.
+    Cosine-similarity thresholds (e.g. `ranking/weights_config.py::
+    min_vector_similarity`) are NOT portable across embedding models and
+    must be re-calibrated with `evaluation/run_benchmark.py` after any swap.
 
 ## When adding a new feature
 

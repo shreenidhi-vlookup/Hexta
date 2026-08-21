@@ -33,7 +33,7 @@ tech stack table.
 |---|---|---|
 | NLP Pipeline | — | Dictionary-based entity extraction (entity_extraction.py) — no spaCy/GLiNER |
 | Entity Recognition | Domain term dictionary | Replaced GLiNER — lighter (~0 MB, microseconds) for the 1 GiB shared host |
-| Embeddings | FastEmbed + BAAI/bge-small-en-v1.5 (ONNX Int8) | ~35MB RAM, unchanged from V3.1 — already optimal |
+| Embeddings | FastEmbed + nomic-ai/nomic-embed-text-v1.5-Q (ONNX Int8) | 768-dim, ~137MB model — swapped from bge-small-en-v1.5; corpus must be re-ingested after any model change |
 | Re-ranking | bge-reranker-base/small, **ONNX Int8 quantized** | quantization added to protect the <200ms p95 latency budget on a shared host |
 | OCR | Tesseract (optional) | unchanged |
 

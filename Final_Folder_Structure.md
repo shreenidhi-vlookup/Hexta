@@ -106,7 +106,7 @@ hexa-knowledge-assistant/
 │   │   │   │   └── checklist_chunker.py
 │   │   │   ├── metadata_extraction.py
 │   │   │   ├── entity_extraction.py         # dictionary-based, batch-time
-│   │   │   ├── embedding.py                 # FastEmbed + bge-small-en-v1.5, batch-time
+│   │   │   ├── embedding.py                 # FastEmbed + nomic-embed-text-v1.5-Q (768-dim), batch-time
 │   │   │   └── indexing.py                  # writes to Postgres (rows + pgvector column)
 │   │   │
 │   │   ├── auth/
@@ -150,7 +150,7 @@ hexa-knowledge-assistant/
 │
 ├── nlp_models/
 │   ├── embeddings/
-│   │   └── bge-small-en-v1.5-onnx-int8/
+│   │   └── nomic-embed-text-v1.5-onnx-int8/
 │   ├── reranker/
 │   │   └── bge-reranker-base-onnx-int8/     # quantized, not raw PyTorch
 │   └── gliner/

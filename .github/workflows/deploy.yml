@@ -42,7 +42,7 @@ jobs:
 
       - name: Run unit tests
         env:
-          HEXA_JWT_SECRET: test-secret
+          HEXA_JWT_SECRET: dev-only-secret-change-me-in-production-32chars
           HEXA_ENVIRONMENT: test
         run: |
           cd backend
@@ -63,17 +63,23 @@ jobs:
       - name: Deploy to EC2 via SSH
         if: github.ref == 'refs/heads/main' && steps.deploy-secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.1.0
+        env:
+          HEXA_JWT_SECRET: ${{ secrets.HEXA_JWT_SECRET }}
+          HEXA_DATABASE_URL: ${{ secrets.HEXA_DATABASE_URL }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: |
-            HEXA_JWT_SECRET=${{ secrets.HEXA_JWT_SECRET }}
-            HEXA_DATABASE_URL=${{ secrets.HEXA_DATABASE_URL }}
+          # appleboy/ssh-action only resolves environment NAMES from the step
+          # env, never inline KEY=VALUE strings — so the secrets must be
+          # declared in the step-level `env:` above and only their names
+          # listed here, otherwise the remote host silently runs with the
+          # compose-file dev defaults.
+          envs: HEXA_JWT_SECRET,HEXA_DATABASE_URL
           script: |
             set -e
 
-            PROJECT_DIR="/opt/hexa"
+            PROJECT_DIR="/opt/projects/hexa"
             LOG_FILE="/var/log/hexa-deploy.log"
 
             cd "$PROJECT_DIR"

@@ -58,7 +58,7 @@ Key invariants:
 Documents
   → Chunking (structural_chunker.py)
   → Extractive LSA summary (Sumy, query-time + batch ingestion)
-  → Embeddings (BAAI/bge-small-en-v1.5 ONNX, quantized)
+  → Embeddings (nomic-ai/nomic-embed-text-v1.5-Q ONNX Int8, 768-dim)
   → PostgreSQL + pgvector
   → Security-filtered hybrid search (BM25 [rank_bm25] + vector [pgvector HNSW], single SQL)
   → RRF rank fusion

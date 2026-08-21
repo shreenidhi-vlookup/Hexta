@@ -25,7 +25,7 @@ DDL_STATEMENTS: list[str] = [
         email               TEXT NOT NULL UNIQUE,
         password_hash       TEXT NOT NULL,
         full_name           TEXT,
-        role                TEXT NOT NULL DEFAULT 'loan_officer',
+        role                TEXT NOT NULL DEFAULT 'processor',
         department          TEXT NOT NULL DEFAULT 'general',
         allowed_departments TEXT[] NOT NULL DEFAULT '{}',
         is_active           BOOLEAN NOT NULL DEFAULT true,
@@ -54,7 +54,7 @@ DDL_STATEMENTS: list[str] = [
         content      TEXT NOT NULL,
         content_hash TEXT NOT NULL UNIQUE,
         summary      TEXT,
-        embedding    vector(384),
+        embedding    vector(768),
         section      TEXT,
         chunk_type   TEXT NOT NULL DEFAULT 'paragraph',
         department   TEXT NOT NULL DEFAULT 'general',
@@ -122,6 +122,20 @@ DDL_STATEMENTS: list[str] = [
         created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
+    # --- Entity graph (GraphRAG-lite) ---
+    # Chunk→entity edges harvested at ingestion (documents/entity_extraction.py).
+    # This is the *compliant* GraphRAG substitute: a graph-shaped index that
+    # lives inside the existing Postgres database — no graph store, no new
+    # container (CLAUDE.md rules 2–3). Query time joins it as a third
+    # retrieval channel in the same SQL statement as BM25+vector (rule 3).
+    """
+    CREATE TABLE IF NOT EXISTS chunk_entity_links (
+        id          BIGSERIAL PRIMARY KEY,
+        chunk_id    BIGINT NOT NULL REFERENCES document_chunks(id) ON DELETE CASCADE,
+        entity      TEXT NOT NULL,
+        entity_type TEXT NOT NULL DEFAULT 'term'
+    )
+    """,
 ]
 
 INDEX_STATEMENTS: list[str] = [
@@ -131,6 +145,11 @@ INDEX_STATEMENTS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON document_chunks USING hnsw (embedding vector_cosine_ops)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_chunks_content_hash ON document_chunks (content_hash)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_settings_user_id ON user_settings (user_id)",
+    # Entity-graph lookup paths: query-time joins by entity, and
+    # chunk-deletion cascades stay cheap during re-ingestion.
+    "CREATE INDEX IF NOT EXISTS idx_entity_links_entity ON chunk_entity_links (entity)",
+    "CREATE INDEX IF NOT EXISTS idx_entity_links_chunk ON chunk_entity_links (chunk_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_entity_links_triple ON chunk_entity_links (chunk_id, entity, entity_type)",
 ]
 
 
@@ -164,6 +183,30 @@ ALTER_STATEMENTS: list[str] = [
     # staff request.
     "UPDATE users SET role = 'processor' "
     "WHERE role IN ('loan_officer', 'underwriter', 'compliance')",
+    # Keep the column default in step with the taxonomy so any future
+    # INSERT that omits role creates a usable account instead of a
+    # loan_officer that require_role will always reject.
+    "ALTER TABLE users ALTER COLUMN role SET DEFAULT 'processor'",
+    # Embedding model swap (bge-small-en-v1.5 384-dim → nomic-embed-text-v1.5
+    # 768-dim). Old vectors are dimensionally incompatible and cannot be
+    # cast, so they are nulled — a FULL RE-INGESTION is required after this
+    # migration runs. Idempotent: matches nothing once the column is 768.
+    """
+    DO $emb$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute a
+            WHERE a.attrelid = 'document_chunks'::regclass
+              AND a.attname = 'embedding'
+              AND format_type(a.atttypid, a.atttypmod) = 'vector(384)'
+        ) THEN
+            ALTER TABLE document_chunks
+                ALTER COLUMN embedding TYPE vector(768)
+                USING NULL::vector(768);
+        END IF;
+    END
+    $emb$;
+    """,
 ]
 
 # Index for client-scored retrieval (Phase 3a).

@@ -69,8 +69,3 @@ def detect_intent(text: str, entities: list[Entity]) -> str:
     if any(e.term_type == "property" or e.term_type == "lender" for e in entities):
         return "eligibility"
     return "general"
-
-
-def doc_type_boost(intent: str) -> set[str]:
-    """doc_types to boost for a given intent (may be empty)."""
-    return domain_terms.INTENT_DOC_TYPE_BOOST.get(intent, set())

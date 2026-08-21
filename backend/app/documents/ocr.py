@@ -55,10 +55,9 @@ def ocr_pdf_pages(
 
     Pages are rasterised **one at a time**. Converting the whole document
     in a single call materialises every page as a PIL image at once —
-    roughly 150-200MB for a 22-page PDF — which survives the development
-    container but would very likely exceed the ~200MB production cap
-    (CLAUDE.md rule 10). Peak memory here is one page regardless of
-    document length.
+    roughly 150-200MB for a 22-page PDF. Peak memory here is one page
+    regardless of document length; see infra/scripts/run_ingestion.sh
+    for the batch's overall memory budget (CLAUDE.md rule 10).
 
     A page whose OCR fails yields an empty string rather than aborting:
     one bad page in a long procedure document should cost that page, not

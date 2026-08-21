@@ -87,6 +87,7 @@ async def login(request: Request, body: LoginRequest) -> LoginResponse:
         client_id=row["client_id"],
         assigned_clients=list(row["assigned_clients"] or []),
         assigned_cases=list(row["assigned_cases"] or []),
+        email=row["email"],
     )
 
     return LoginResponse(

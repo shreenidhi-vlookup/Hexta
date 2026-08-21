@@ -116,12 +116,28 @@ export default function HomePage() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [latestResponseId, setLatestResponseId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  // Per-message, not global: "View sources" on one answer must not open the
+  // panel on every answer in the thread. Keyed by message id.
+  const [sourcesOpen, setSourcesOpen] = useState<Record<string, boolean>>({});
+  // Which message's 3-dot menu is open (null = none).
+  const [sourceMenuFor, setSourceMenuFor] = useState<string | null>(null);
   const messageIdRef = useRef(0);
   const submittingRef = useRef(false);
   const turnsRef = useRef<ChatTurn[]>([]);
   const hasInitializedChatRef = useRef(false);
+  const streamIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clear any in-flight title-streaming interval if the component unmounts
+  // mid-stream (logout/new chat/nav) — otherwise it keeps calling setState
+  // on an unmounted component until the title finishes.
+  useEffect(() => {
+    return () => {
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+        streamIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   const isCurrentResponse = (m: ChatMessage) =>
     m.from === "assistant" && m.id === latestResponseId;
@@ -170,6 +186,19 @@ export default function HomePage() {
     },
     [persistChat],
   );
+
+  const removeLastAssistantTurn = useCallback((replaceMsgId?: string) => {
+    // Only meaningful during regenerate (replaceMsgId set). Remove the
+    // previous assistant turn for the regenerated query so the persisted
+    // chat doesn't accumulate a duplicate (stale) bubble per regenerate.
+    if (!replaceMsgId) return;
+    for (let i = turnsRef.current.length - 1; i >= 0; i--) {
+      if (turnsRef.current[i].role === "assistant") {
+        turnsRef.current.splice(i, 1);
+        break;
+      }
+    }
+  }, []);
 
   const buildHistory = useCallback((msgs: ChatMessage[]) => {
     const turns: { question: string; answer?: string }[] = [];
@@ -394,6 +423,10 @@ export default function HomePage() {
         ]);
       }
       setLatestResponseId(msgId);
+      // Regenerate replaces the previous assistant turn in place — otherwise
+      // every regenerate leaves a second (stale) assistant turn in the
+      // persisted chat, so a restored chat diverges from the live UI.
+      removeLastAssistantTurn(replaceMsgId);
       appendTurn({ role: "assistant", content: canned.text });
       submittingRef.current = false;
       return;
@@ -429,6 +462,10 @@ export default function HomePage() {
         isStreaming: true,
       });
       setLatestResponseId(msgId);
+      // Regenerate replaces the previous assistant turn in place — otherwise
+      // every regenerate leaves a second (stale) assistant turn in the
+      // persisted chat, so a restored chat diverges from the live UI.
+      removeLastAssistantTurn(replaceMsgId);
       appendTurn({
         role: "assistant",
         content: result.answer_phrase || result.title,
@@ -446,9 +483,11 @@ export default function HomePage() {
           attach(msgId, { streamedTitle: currentTitle });
         } else {
           clearInterval(streamInterval);
+          streamIntervalRef.current = null;
           attach(msgId, { isStreaming: false });
         }
       }, 30);
+      streamIntervalRef.current = streamInterval;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);
@@ -551,9 +590,12 @@ export default function HomePage() {
                                   blocks={message.response.answers}
                                   comparison={message.response.comparison}
                                   timestamp={message.timestamp}
-                                  sourcesOpen={sourcesOpen}
+                                  sourcesOpen={!!sourcesOpen[message.id]}
                                   onToggleSources={() =>
-                                    setSourcesOpen((open) => !open)
+                                    setSourcesOpen((prev) => ({
+                                      ...prev,
+                                      [message.id]: !prev[message.id],
+                                    }))
                                   }
                                 />
                               ) : (
@@ -565,9 +607,12 @@ export default function HomePage() {
                                   routing={message.response.routing}
                                   embedded
                                   timestamp={message.timestamp}
-                                  sourcesOpen={sourcesOpen}
+                                  sourcesOpen={!!sourcesOpen[message.id]}
                                   onToggleSources={() =>
-                                    setSourcesOpen((open) => !open)
+                                    setSourcesOpen((prev) => ({
+                                      ...prev,
+                                      [message.id]: !prev[message.id],
+                                    }))
                                   }
                                 />
                               )}
@@ -637,8 +682,10 @@ export default function HomePage() {
                                 <RefreshCw className="h-3.5 w-3.5" />
                               </Button>
                               <DropdownMenu
-                                open={sourceMenuOpen}
-                                onOpenChange={setSourceMenuOpen}
+                                open={sourceMenuFor === message.id}
+                                onOpenChange={(open) =>
+                                  setSourceMenuFor(open ? message.id : null)
+                                }
                               >
                                 <DropdownMenuTrigger asChild>
                                   <Button
@@ -654,11 +701,14 @@ export default function HomePage() {
                                 <DropdownMenuContent align="end" side="bottom">
                                   <DropdownMenuItem
                                     onClick={() => {
-                                      setSourcesOpen((open) => !open);
-                                      setSourceMenuOpen(false);
+                                      setSourcesOpen((prev) => ({
+                                        ...prev,
+                                        [message.id]: !prev[message.id],
+                                      }));
+                                      setSourceMenuFor(null);
                                     }}
                                   >
-                                    {sourcesOpen
+                                    {sourcesOpen[message.id]
                                       ? "Hide sources"
                                       : "View sources"}
                                   </DropdownMenuItem>

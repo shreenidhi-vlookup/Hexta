@@ -18,7 +18,7 @@ A lightweight, retrieval-only AI assistant for compliance and document queries. 
 ## Architecture Overview
 
 ```
-Browser → Nginx (30MB) → FastAPI (socket-activated, 200MB cap, idle-stops)
+Browser → Nginx (30MB) → FastAPI (socket-activated, 400MB cap, idle-stops)
                                     │
                     ┌───────────────┼────────────────┐
                     ▼                ▼               ▼
@@ -42,7 +42,7 @@ Document Ingestion (batch only — never in API path)
 | **RBAC in WHERE clause** | Department access enforced by Postgres filtering, not post-hoc checks |
 | **Socket-activated backend** | FastAPI runs with `--workers 1`, idle-stops after 10 minutes |
 | **Batch ingestion only** | OCR, embedding, and NLP run in `ingest_batch.py`, never in API process |
-| **Memory caps** | Postgres ~200MB, Nginx ~30MB, Backend ~200MB |
+| **Memory caps** | Postgres ~200MB, Nginx ~30MB, Backend 400MB (nomic embedding model), ingestion ~600MB transient |
 | **Audit logging** | Every query logged with user, retrieved docs, confidence, timestamp |
 
 ---
@@ -56,7 +56,7 @@ Document Ingestion (batch only — never in API path)
 | Server | **Uvicorn 0.52.1** | ASGI server, `--workers 1` (socket-activated) |
 | Database | **PostgreSQL 16 + pgvector** | BM25 search + vector similarity in single query |
 | Driver | **psycopg 3.3.4** | Connection pooling, cursor access |
-| Embeddings | **FastEmbed 0.8.0** | `bge-small-en-v1.5` (384-dim, ~66MB) |
+| Embeddings | **FastEmbed 0.8.0** | `nomic-ai/nomic-embed-text-v1.5-Q` (768-dim, ~137MB) |
 | Inference runtime | **ONNX Runtime 1.28.0** | Runs FastEmbed model |
 | Auth | **PyJWT 2.13.0** | HS256-signed tokens with RBAC claims |
 | Config | **Pydantic 2.13.4** | Type-safe settings with env-var binding |

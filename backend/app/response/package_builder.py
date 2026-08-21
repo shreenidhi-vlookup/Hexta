@@ -534,7 +534,6 @@ def _extract_answer_phrase(
 def build_response_package(
     candidates: list[RankedCandidate],
     query_text: str,
-    user_departments: list[str] | None = None,
 ) -> ResponsePackage:
     """Build a ResponsePackage from ranked candidates.
 

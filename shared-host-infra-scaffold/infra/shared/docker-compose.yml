@@ -36,6 +36,11 @@ services:
       POSTGRES_USER: ${POSTGRES_SUPERUSER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set in .env}
       POSTGRES_DB: postgres
+      # Read by infra/shared/postgres/init/01_hexa_assistant.sql at first
+      # container start to create the per-project app role with a password
+      # (never a committed literal). Must match backend/.env's
+      # HEXA_DATABASE_URL password for the app to connect.
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set in .env}
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -64,6 +69,15 @@ services:
       - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # ACME challenge webroot + certificates, so the HTTP->HTTPS redirect
+      # and the commented TLS server block in conf.d/hexa-assistant.conf can
+      # actually serve certs from inside the container. certbot runs on the
+      # host with `--webroot -w /var/www/certbot` and writes
+      # /etc/letsencrypt — both mounted here read-only.
+      - /var/www/certbot:/var/www/certbot:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Static frontend export, shared from the host (Next.js output:export).
+      - /opt/projects/hexa/frontend/out:/opt/projects/hexa/frontend/out:ro
     deploy:
       resources:
         limits:

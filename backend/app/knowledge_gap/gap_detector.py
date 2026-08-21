@@ -10,8 +10,12 @@ Uses the no-answer threshold from response.confidence_thresholds
 
 from __future__ import annotations
 
+import logging
+
 from app.db.postgres.session import acquire
 from app.response.confidence_thresholds import DEFAULT_THRESHOLDS
+
+logger = logging.getLogger(__name__)
 
 
 def detect_and_log(
@@ -43,4 +47,7 @@ def detect_and_log(
                 )
                 conn.commit()
     except Exception:
-        pass  # silently fail — gap detection is best-effort
+        # Best-effort by contract (must never break the request path), but a
+        # DB failure here is still a signal — a silent pass would hide an
+        # outage that stops ALL gap logging. Log it and move on.
+        logger.warning("Failed to record knowledge gap for query %r", query, exc_info=True)

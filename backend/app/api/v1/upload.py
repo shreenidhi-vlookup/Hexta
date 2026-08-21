@@ -130,6 +130,14 @@ async def upload_document(
     content = b""
     while chunk := await file.read(8192):
         file_size += len(chunk)
+        # Enforce the cap while reading, not after the whole body has been
+        # buffered in memory — a 2GB upload would otherwise exhaust worker
+        # RAM before validate_upload ever saw its size.
+        if file_size > settings.max_upload_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"File exceeds the {settings.max_upload_bytes} byte limit",
+            )
         content += chunk
 
     result = validate_upload(file.filename, file_size)

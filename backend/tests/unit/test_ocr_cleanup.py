@@ -138,10 +138,10 @@ class TestOcrPageByPage:
     """ocr_pdf_pages used to call convert_from_path once for the whole
     document, materialising every page as a PIL image simultaneously --
     roughly 150-200MB for a 22-page PDF at the 200 DPI default. That
-    survives the 512MB development cap but would very likely OOM against
-    the ~200MB production figure in CLAUDE.md rule 10, inside a detached
-    batch process whose failure surfaces only as a document that never
-    appears.
+    would stack on top of the embedding model's ~275MB peak inside a
+    detached batch process (see the ingestion memory budget documented
+    in infra/scripts/run_ingestion.sh / CLAUDE.md rule 10), whose
+    failure surfaces only as a document that never appears.
     """
 
     def _stub_pdf2image(self, monkeypatch, pages: int):

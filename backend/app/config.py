@@ -38,7 +38,10 @@ class Settings(BaseSettings):
     database_pool_timeout_s: int = 30
 
     # --- Auth ---
-    jwt_secret: str = ""  # required via HEXA_JWT_SECRET env var; no default for safety
+    # No default on purpose: an empty secret would let anyone mint a valid
+    # admin JWT. The validator below hard-fails on startup instead of
+    # silently running with a forgeable key.
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 480
 
@@ -48,9 +51,8 @@ class Settings(BaseSettings):
 
     # --- Embeddings (query-time, always-on process) ---
     embedding_enabled: bool = True
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_model: str = "nomic-ai/nomic-embed-text-v1.5-Q"
     embedding_cache_dir: str = "nlp_models/embeddings"
-    embedding_dim: int = 384
 
     # --- Storage ---
     storage_pending_dir: str = "storage/pending"
@@ -59,9 +61,7 @@ class Settings(BaseSettings):
 
     # --- Search ---
     bm25_limit: int = 25
-    vector_limit: int = 25
     max_sub_queries: int = 6
-    max_history_turns: int = 4
     max_alias_ngram: int = 3
 
     # --- Response ---
@@ -96,11 +96,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> "Settings":
         if not self.jwt_secret:
-            if self.environment == "development":
-                # Allow empty secret only in development — tests use env vars
-                return self
+            # An empty HS256 key lets anyone forge a valid admin token in
+            # ANY environment, including development and any misconfigured
+            # deploy that forgets to set HEXA_JWT_SECRET. Fail fast instead.
             raise ValueError(
-                "HEXA_JWT_SECRET must be set when environment is not 'development'"
+                "HEXA_JWT_SECRET must be set (generate one with "
+                "`python -c \"import secrets; print(secrets.token_urlsafe(48))\"` "
+                "and export it before starting the backend)."
             )
         return self
 

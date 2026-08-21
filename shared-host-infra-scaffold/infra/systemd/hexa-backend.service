@@ -6,7 +6,10 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/projects/hexa/backend
-EnvironmentFile=/opt/projects/hexa/backend/.env
+# `-` prefix: a missing .env must not fail the unit — the service can
+# still start and simply fall back to config.py defaults. Create the file
+# from backend/.env.example during provisioning (see infra/README.md).
+EnvironmentFile=-/opt/projects/hexa/backend/.env
 
 # --workers 1: never run more than one Uvicorn worker on this box —
 # each worker duplicates the full app footprint in memory.
@@ -16,7 +19,14 @@ EnvironmentFile=/opt/projects/hexa/backend/.env
 ExecStart=/opt/projects/hexa/backend/.venv/bin/uvicorn \
     app.main:app --workers 1 --fd 3
 
-MemoryMax=200M
+# MemoryMax=400M: sized for the nomic-embed-text-v1.5-Q swap. Measured
+# peak RSS of loading + running the model for one query embedding is
+# ~275MB (vs ~80MB for the previous bge-small-en-v1.5); the rest is
+# interpreter + FastAPI headroom. The model loads lazily on the first
+# vector search and stays resident while the service is up, so the cap
+# must cover the loaded state, not the idle state. Do not lower without
+# re-measuring via evaluation/run_benchmark.py's cold_start probe.
+MemoryMax=400M
 CPUWeight=50
 
 Restart=on-failure

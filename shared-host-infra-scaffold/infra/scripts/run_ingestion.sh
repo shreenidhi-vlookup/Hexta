@@ -9,6 +9,13 @@
 # cost 24/7 even when nobody is uploading documents. Running it
 # here means the memory is only held for the duration of the job.
 #
+# Memory note (nomic-embed-text-v1.5-Q): loading + running the model
+# peaks at ~275MB RSS, and scanned-PDF OCR (page rasterisation) can
+# retain a comparable amount until process exit. Budget ~600MB of FREE
+# memory for the duration of a batch — do not run concurrently with
+# other heavy jobs on the shared host. If wrapping in a systemd scope,
+# use `-p MemoryMax=700M` rather than the API service's 400M.
+#
 # Trigger this manually, via cron, or via a lightweight upload-queue
 # consumer — never call it from inside app.main directly.
 

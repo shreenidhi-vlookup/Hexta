@@ -252,14 +252,6 @@ INTENT_KEYWORDS: dict[str, set[str]] = {
     "definition": {"what is", "what are", "define", "meaning", "explain"},
 }
 
-# doc_type boost map for intents (used by ranking metadata boost).
-INTENT_DOC_TYPE_BOOST: dict[str, set[str]] = {
-    "documents": {"checklist", "form_guide"},
-    "process": {"process", "program_guide"},
-    "requirements": {"policy", "program_guide"},
-    "limits": {"policy", "program_guide"},
-}
-
 # Alias table: every surface form -> (canonical, type). Built once.
 _ALIAS_INDEX: dict[str, tuple[str, str]] = {}
 for _canonical, _meta in DOMAIN_TERMS.items():

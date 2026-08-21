@@ -50,7 +50,7 @@
 
 | Model | Location | Status |
 |---|---|---|
-| bge-small-en-v1.5 (ONNX Int8) | nlp_models/embeddings/ | Downloaded by FastEmbed at runtime |
+| nomic-embed-text-v1.5-Q (ONNX Int8) | nlp_models/embeddings/ | Downloaded by FastEmbed at runtime |
 | bge-reranker-base/small (ONNX Int8) | nlp_models/reranker/ | Downloaded by transformers at runtime |
 | — (no NLP model needed) | — | Dictionary-based entity extraction — no model required |
 

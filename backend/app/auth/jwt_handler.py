@@ -17,12 +17,13 @@ from app.config import settings
 
 def create_token(
     subject: str,
-    role: str = "loan_officer",
+    role: str = "processor",
     department: str = "general",
     allowed_departments: list[str] | None = None,
     client_id: str | None = None,
     assigned_clients: list[str] | None = None,
     assigned_cases: list[str] | None = None,
+    email: str | None = None,
 ) -> str:
     """Create a signed JWT for the given user.
 
@@ -30,7 +31,8 @@ def create_token(
     at search time: user role, primary department, the full list of
     departments the user may query, and (for client users) the client_id
     scope. Staff may additionally carry assigned_clients and assigned_cases
-    for fine-grained scoping (Phase 3b).
+    for fine-grained scoping (Phase 3b). The email claim lets the
+    /verify endpoint return the caller's identity without another DB hit.
     """
     now = int(time.time())
     payload = {
@@ -41,6 +43,8 @@ def create_token(
         "iat": now,
         "exp": now + (settings.jwt_expiry_minutes * 60),
     }
+    if email is not None:
+        payload["email"] = email
     if client_id is not None:
         payload["client_id"] = client_id
     if assigned_clients:
@@ -57,19 +61,5 @@ def verify_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         return payload
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-    except Exception:
-        return None
-
-
-def decode_for_audit(token: str) -> dict | None:
-    """Decode a JWT without verification (for audit logging of failed tokens)."""
-    try:
-        # Decode without verification to extract the subject for auditing
-        # even if the token is expired/invalid.
-        return jwt.decode(token, options={"verify_signature": False})
-    except Exception:
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
