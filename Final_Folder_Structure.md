@@ -81,7 +81,7 @@ hexa-knowledge-assistant/
 │   │   │   ├── pgvector_search.py          # replaces vector_search.py (Qdrant removed)
 │   │   │   ├── bm25_search.py              # PostgreSQL full text search
 │   │   │   ├── metadata_filters.py         # RBAC + active-version pre-filter (enforced HERE)
-│   │   │   └── hybrid_orchestrator.py      # single SQL query: BM25 + pgvector + filters
+│   │   │   └── hybrid_orchestrator.py      # single SQL query: Multi-Query variants + BM25 + pgvector + entity channel + filters
 │   │   │
 │   │   ├── ranking/
 │   │   │   ├── rrf.py

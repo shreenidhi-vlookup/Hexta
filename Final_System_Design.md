@@ -77,7 +77,7 @@ flowchart TD
     API --> AUTH[Authentication - JWT]
     API --> QP[Query Processing Engine]
     API --> FB[Feedback API]
-    QP --> HS[Hybrid Search<br/>single Postgres query:<br/>BM25 + pgvector + RBAC filter]
+    QP --> HS[Hybrid Search<br/>single Postgres query:<br/>Multi-Query variants + BM25 + pgvector + entity channel + RBAC filter]
     HS --> RANK[Ranking Engine - RRF]
     RANK --> RERANK[Cross-Encoder Re-ranking<br/>ONNX Int8, top-10]
     RERANK --> PKG[Response Packaging]
@@ -110,6 +110,14 @@ The biggest structural change from V3.1: BM25, vector similarity, and
 RBAC/version filtering are no longer three separate systems fused in
 application code — they're one SQL query against the shared Postgres
 instance.
+
+Phase 5 additions, still inside that single statement:
+- **Multi-Query** — every deterministic variant
+  (`query_expansion.generate_query_variants`) is embedded; chunks are
+  admitted/ranked by best similarity across variants.
+- **GraphRAG-lite entity channel** — `chunk_entity_links`
+  (chunk→canonical-entity edges harvested at ingestion) contributes a
+  third RRF rank keyed on canonical query entities.
 
 ```sql
 -- Illustrative shape, not final SQL

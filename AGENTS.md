@@ -16,9 +16,10 @@ This file captures everything known about the Hexta project — architecture, st
 Documents
   → Chunking (structural_chunker.py)
   → Extractive Summarization (sumy LSA, batch only)
-  → Embeddings (nomic-embed-text-v1.5, ONNX quantized, 768-dim)
+  → Embeddings (nomic-embed-text-v1.5-Q, ONNX quantized, 768-dim)
   → PostgreSQL + pgvector
-  → Hybrid Search (BM25 + Vector, single SQL query)
+  → Hybrid Search (Multi-Query variants + BM25 + Vector + Entity channel,
+    single SQL query)
   → RRF Rank Fusion
   → Optional Cross-Encoder Reranking
   → Response Package (answer_phrase + excerpts + confidence + routing)
@@ -61,7 +62,8 @@ Documents
 | `backend/app/response/package_builder.py` | Builds ResponsePackage with answer_phrase + excerpts |
 | `backend/app/response/confidence_thresholds.py` | `route_by_confidence()` — maps score to answer/partial/no_answer |
 | `backend/app/response/validation.py` | Safety-net RBAC/version check |
-| `backend/app/search/hybrid_orchestrator.py` | Combined BM25 + pgvector SQL query |
+| `backend/app/search/hybrid_orchestrator.py` | Combined Multi-Query + BM25 + pgvector + entity-channel SQL query |
+| `backend/app/query_processing/query_expansion.py` | Alias expansion + deterministic Multi-Query variants |
 | `backend/app/ranking/rrf.py` | Reciprocal Rank Fusion |
 | `backend/app/ranking/reranker.py` | Optional cross-encoder reranking |
 | `backend/app/documents/summarization.py` | Extractive LSA summarization (batch only) |

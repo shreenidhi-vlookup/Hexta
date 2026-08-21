@@ -105,21 +105,25 @@ Raw query: "What are the credit score requirements for VA loans?"
 ```
 
 ### 3. Hybrid Search (`search/hybrid_orchestrator.py`)
-A **single SQL query** combines everything:
+A **single SQL query** combines everything (illustrative shape):
 
 ```sql
 SELECT chunks.*, 
        ts_rank_cd(chunks.fts, plainto_tsquery($1)) AS bm25_score,
-       1 - (chunks.embedding <=> $2) AS vec_score
+       GREATEST(1 - (chunks.embedding <=> :v1), ...variants) AS vec_score,
+       ent.hits AS entity_hits        -- GraphRAG-lite channel
 FROM document_chunks chunks
+LEFT JOIN (SELECT chunk_id, COUNT(DISTINCT entity) AS hits
+           FROM chunk_entity_links WHERE entity = ANY(:entities)
+           GROUP BY chunk_id) ent ON ent.chunk_id = chunks.id
 WHERE chunks.is_active = true
   AND chunks.is_approved = true          -- version filter
   AND chunks.department = ANY($3)       -- RBAC filter (in WHERE, not post-hoc)
-ORDER BY ts_rank_cd(...) * 0.3 + (1 - (embedding <=> query_vec)) * 0.7 DESC
+ORDER BY rrf_score DESC                 -- RRF over BM25 + vector + entity ranks
 LIMIT 25;
 ```
 
-BM25 scores text relevance using PostgreSQL's full-text search (`tsvector`), vector search uses pgvector's `vector_cosine_ops` HNSW index. Both use the same WHERE clause for RBAC — **no post-hoc filtering**.
+BM25 scores text relevance using PostgreSQL's full-text search (`tsvector`); vector search uses pgvector's `vector_cosine_ops` HNSW index, with **best similarity across all deterministic Multi-Query variants** (`query_expansion.generate_query_variants`). The `chunk_entity_links` join adds a third RRF channel keyed on canonical query entities. All channels share the same WHERE clause for RBAC — **no post-hoc filtering**.
 
 ### 4. Ranking (`ranking/rrf.py`)
 Reciprocal Rank Fusion combines BM25-ranked and vector-ranked lists:

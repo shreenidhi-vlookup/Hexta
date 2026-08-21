@@ -7,10 +7,11 @@ revisit the architecture. If a task seems to require breaking one of these
 rules, stop and ask rather than silently working around it.
 
 Companion docs (read these for full detail, this file is the summary):
-- `docs/Final_System_Design.md` — architecture, flowcharts, rationale
-- `docs/Final_Tech_Stack.md` — full stack table
-- `docs/Final_Folder_Structure.md` — where everything lives
-- `.claude/skills/hexa-assistant-builder/SKILL.md` — step-by-step build order
+- `Final_System_Design.md` — architecture, flowcharts, rationale
+- `Final_Tech_Stack.md` — full stack table
+- `Final_Folder_Structure.md` — where everything lives
+- `SKILL.md` — step-by-step build order
+- `docs/adr/` — architecture decision records (HyDE rejection, ColPali deferral)
 
 ---
 
