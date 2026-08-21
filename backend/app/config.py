@@ -62,7 +62,12 @@ class Settings(BaseSettings):
     # env (HEXA_ANTHROPIC_API_KEY maps here) — never committed.
     llm_enabled: bool = False
     llm_api_key: str = ""
-    llm_model: str = "claude-haiku-4-5"
+    # Two-tier routing (Stage 2): simple questions go to the fast/cheap
+    # model, complex ones (comparisons, multi-part, long explanatory
+    # questions — see llm_synthesis.is_complex_question) to the stronger
+    # one. Both must support the Messages API.
+    llm_simple_model: str = "claude-haiku-4-5"
+    llm_complex_model: str = "claude-sonnet-4-5"
     llm_timeout_ms: int = 4000
     llm_max_tokens: int = 600
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -48,6 +49,41 @@ class SynthesisResult:
     model: str
 
 
+# Signals that a question needs the stronger (slower, pricier) model:
+# explicit comparison, multi-part structure, or explanatory depth.
+_COMPLEX_MARKERS = (
+    "compare", "comparison", "difference", "different", "versus", " vs ",
+    "why", "explain", "trade-off", "tradeoff", "pros and cons",
+    "which is better", "walk me through", "step by step", "impact of",
+)
+
+
+def is_complex_question(question: str) -> bool:
+    """Heuristic complexity router — Stage 2 of the integration plan.
+
+    Deterministic, zero-cost, no LLM call. A question is 'complex' when
+    it compares things, asks for explanation/causation, or carries many
+    content words. Everything else routes to the fast model.
+    """
+    q = f" {question.lower().strip()} "
+    if any(marker in q for marker in _COMPLEX_MARKERS):
+        return True
+    # Multi-part: several distinct asks in one message.
+    if question.count("?") > 1 or ";" in question:
+        return True
+    # Length proxy: many CONTENT words (stop/question words removed) tend
+    # to mean multiple constraints that need to be balanced together.
+    from app.query_processing import domain_terms
+    words = re.findall(r"[a-z']+", q)
+    content = [
+        w for w in words
+        if w not in domain_terms.COMMON_WORDS
+        and w not in domain_terms.QUESTION_STARTERS
+        and w not in _COMPLEX_MARKERS
+    ]
+    return len(content) > 6
+
+
 def _build_user_prompt(question: str, evidence: list[str]) -> str:
     passages = "\n\n".join(
         f"[{i}] {text}" for i, text in enumerate(evidence, start=1)
@@ -55,12 +91,18 @@ def _build_user_prompt(question: str, evidence: list[str]) -> str:
     return f"Question: {question}\n\nEvidence passages:\n{passages}"
 
 
-def synthesize(question: str, evidence: list[str]) -> SynthesisResult | None:
+def synthesize(
+    question: str,
+    evidence: list[str],
+    model: str | None = None,
+) -> SynthesisResult | None:
     """Call Claude to synthesize a cited answer from retrieved evidence.
 
-    Returns None on ANY failure — disabled, missing key, timeout, HTTP
-    error, empty/malformed response — so the caller can fall back to the
-    extractive answer without branching on error types.
+    ``model`` overrides the default (simple-tier) model — the search
+    pipeline passes the complex-tier model for questions the router
+    flags. Returns None on ANY failure — disabled, missing key, timeout,
+    HTTP error, empty/malformed response — so the caller can fall back
+    to the extractive answer without branching on error types.
     """
     if not settings.llm_enabled:
         return None
@@ -71,7 +113,7 @@ def synthesize(question: str, evidence: list[str]) -> SynthesisResult | None:
         return None
 
     payload = json.dumps({
-        "model": settings.llm_model,
+        "model": model or settings.llm_simple_model,
         "max_tokens": settings.llm_max_tokens,
         "system": _SYSTEM_PROMPT,
         "messages": [
@@ -113,4 +155,4 @@ def synthesize(question: str, evidence: list[str]) -> SynthesisResult | None:
 
     if not text:
         return None
-    return SynthesisResult(text=text, model=settings.llm_model)
+    return SynthesisResult(text=text, model=model or settings.llm_simple_model)

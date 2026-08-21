@@ -20,13 +20,29 @@ import logging
 from psycopg import Connection
 from psycopg.types.json import Json
 
+from app.config import settings
+from app.response import grounding
+
 logger = logging.getLogger(__name__)
 
 
 def compute_keys(query: str, history: list[dict], user: dict) -> tuple[str, str]:
-    """Return ``(query_hash, scope_hash)`` for a request."""
+    """Return ``(query_hash, scope_hash)`` for a request.
+
+    The query hash includes a generator fingerprint (LLM tier enabled +
+    which models + grounding threshold): changing any of them changes the
+    answers the pipeline produces, so cached entries from a different
+    configuration must never replay.
+    """
+    fingerprint = json.dumps({
+        "llm": settings.llm_enabled,
+        "simple": settings.llm_simple_model,
+        "complex": settings.llm_complex_model,
+        "grounding": grounding.GROUNDING_MIN_OVERLAP,
+    }, sort_keys=True)
     payload = json.dumps(
-        {"q": query, "h": history}, sort_keys=True, default=str
+        {"q": query, "h": history, "gen": fingerprint},
+        sort_keys=True, default=str,
     )
     query_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

@@ -2,6 +2,14 @@ x-backend-env: &backend-env
   HEXA_DATABASE_URL: "${HEXA_DATABASE_URL:-postgresql://hexa_app:devpass@postgres:5432/hexa_assistant}"
   HEXA_JWT_SECRET: "${HEXA_JWT_SECRET:-dev-only-secret-change-me-in-production-32chars}"
   HEXA_ENVIRONMENT: "${HEXA_ENVIRONMENT:-development}"
+  # LLM synthesis tier (docs/LLM_INTEGRATION_PLAN.md) — values come from
+  # the repo-root .env (gitignored). OFF unless explicitly enabled.
+  HEXA_LLM_ENABLED: "${HEXA_LLM_ENABLED:-false}"
+  # The secret's canonical name is HEXA_ANTHROPIC_API_KEY; config.py reads
+  # it as llm_api_key → HEXA_LLM_API_KEY. Map here so either env name works.
+  HEXA_LLM_API_KEY: "${HEXA_ANTHROPIC_API_KEY:-}${HEXA_LLM_API_KEY:-}"
+  HEXA_LLM_SIMPLE_MODEL: "${HEXA_LLM_SIMPLE_MODEL:-claude-haiku-4-5}"
+  HEXA_LLM_COMPLEX_MODEL: "${HEXA_LLM_COMPLEX_MODEL:-claude-sonnet-4-5}"
 
 services:
   postgres:

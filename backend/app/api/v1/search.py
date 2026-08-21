@@ -481,7 +481,14 @@ def _run_attempt(
         and package.excerpts
     ):
         evidence_texts = [e.text for e in package.excerpts[:5]]
-        result = llm_synthesis.synthesize(question, evidence_texts)
+        # Stage 2 two-tier routing: comparisons / multi-part / explanatory
+        # questions go to the stronger model, everything else to the fast one.
+        chosen_model = (
+            settings.llm_complex_model
+            if llm_synthesis.is_complex_question(question)
+            else settings.llm_simple_model
+        )
+        result = llm_synthesis.synthesize(question, evidence_texts, model=chosen_model)
         if result is not None:
             verdict = grounding.check_grounding(result.text, evidence_texts)
             if verdict.passed:

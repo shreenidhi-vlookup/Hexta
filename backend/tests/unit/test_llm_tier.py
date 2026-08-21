@@ -46,7 +46,25 @@ class TestSynthesize:
             result = llm_synthesis.synthesize("q", EVIDENCE)
         assert result is not None
         assert "580" in result.text
-        assert result.model == settings.llm_model
+        assert result.model == settings.llm_simple_model
+
+    def test_explicit_model_overrides_default(self, monkeypatch):
+        monkeypatch.setattr(settings, "llm_enabled", True)
+        monkeypatch.setattr(settings, "llm_api_key", "test-key")
+        body = {"content": [{"type": "text", "text": "Answer [1]."}]}
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["body"] = json.loads(request.data.decode())
+            response = MagicMock()
+            response.read.return_value = json.dumps(body).encode()
+            response.__enter__.return_value = response
+            return response
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            result = llm_synthesis.synthesize("q", EVIDENCE, model="claude-sonnet-4-5")
+        assert result.model == "claude-sonnet-4-5"
+        assert captured["body"]["model"] == "claude-sonnet-4-5"
 
     def test_http_error_returns_none(self, monkeypatch):
         import urllib.error
@@ -102,6 +120,35 @@ class TestGrounding:
             "FHA requires a minimum credit score of 580.", []
         )
         assert not verdict.passed
+
+
+class TestComplexityRouter:
+    def test_simple_question_routes_to_fast_tier(self):
+        assert not llm_synthesis.is_complex_question(
+            "What is the minimum credit score for an FHA loan?"
+        )
+
+    def test_comparison_is_complex(self):
+        assert llm_synthesis.is_complex_question(
+            "Compare FHA and VA loan down payment requirements"
+        )
+
+    def test_explanatory_is_complex(self):
+        assert llm_synthesis.is_complex_question(
+            "Why does the down payment depend on the applicant's credit score?"
+        )
+
+    def test_multi_part_is_complex(self):
+        assert llm_synthesis.is_complex_question(
+            "What is PMI? ; When does it drop off? ; Can I avoid it?"
+        )
+
+    def test_long_multi_constraint_is_complex(self):
+        assert llm_synthesis.is_complex_question(
+            "What are the requirements for a self employed borrower "
+            "with rental property income and a recent bankruptcy "
+            "applying for a conventional refinance?"
+        )
 
 
 class TestResponseCacheKeys:

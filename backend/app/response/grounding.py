@@ -36,7 +36,9 @@ from app.query_processing import domain_terms
 GROUNDING_MIN_OVERLAP: float = 0.6
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
-_WORD_RE = re.compile(r"[a-z0-9.]+")
+# Word regex: allows internal dots (decimals like 3.5) but never keeps
+# trailing punctuation — "payments." must match "payments".
+_WORD_RE = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)*")
 
 # Generic verbs/connectors that carry no checkable claim content.
 _SOFT_TERMS = frozenset((
@@ -89,7 +91,11 @@ def check_grounding(answer_text: str, evidence_texts: list[str]) -> GroundingVer
     """
     answer_text = _CITATION_RE.sub("", answer_text or "")
     evidence_blob = " ".join(evidence_texts or []).lower()
-    evidence_numbers = set(re.findall(r"\d[\d,]*(?:\.\d+)?", evidence_blob))
+    # Commas stripped on BOTH sides: "$1,500" in prose must match "1500".
+    evidence_numbers = {
+        n.replace(",", "")
+        for n in re.findall(r"\d[\d,]*(?:\.\d+)?", evidence_blob)
+    }
 
     failed: list[str] = []
     grounded = 0
